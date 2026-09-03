@@ -3,6 +3,7 @@ import type { GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import { AGY_SCHEMA_ALLOWLIST, toAgyRequestBody } from '../src/adapter/translate.ts'
 import { parseAgySse, parseSseDataLine } from '../src/adapter/parse.ts'
 import { catalogModelList, fetchAvailableModels, listAgyModels, mergeModelCatalog, resolveAgyModel } from '../src/adapter/models.ts'
+import { formatTieredModelName } from '../src/adapter/catalog.ts'
 import { AgyAdapter } from '../src/adapter/adapter.ts'
 import type { AgyAccountSession } from '../src/adapter/adapter.ts'
 import { AgyAuthError, AgyPoolBlockedError } from '../src/types.ts'
@@ -561,6 +562,12 @@ describe('parseAgySse', () => {
 })
 
 describe('models', () => {
+  it('formats tiered model ids into human-readable display names', () => {
+    expect(formatTieredModelName('gemini-3.8-flash-tiered')).toBe('Gemini 3.8 Flash')
+    expect(formatTieredModelName('gemini-3.9-flash-tiered')).toBe('Gemini 3.9 Flash')
+    expect(formatTieredModelName('gemini-4.0-pro-tiered')).toBe('Gemini 4.0 Pro')
+  })
+
   it('merges dynamic ids with catalog metadata and filters tab models', () => {
     const merged = mergeModelCatalog({
       models: {
