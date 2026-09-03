@@ -21,6 +21,7 @@ export interface CatalogModel {
 }
 
 export const AGY_PUBLIC_MODELS: readonly CatalogModel[] = [
+  { id: 'gemini-3.8-flash-tiered', name: 'Gemini 3.8 Flash', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
   { id: 'gemini-3.7-flash-tiered', name: 'Gemini 3.7 Flash', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
   { id: 'gemini-3.6-flash-tiered', name: 'Gemini 3.6 Flash (Tiered)', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
   { id: 'gemini-3.6-flash-high', name: 'Gemini 3.6 Flash (High)', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true },
@@ -42,16 +43,43 @@ export const AGY_PUBLIC_MODELS: readonly CatalogModel[] = [
 
 const CATALOG_BY_ID = new Map(AGY_PUBLIC_MODELS.map((m) => [m.id, m]))
 
+/** Format dynamic tiered model id to display name (e.g. 'gemini-3.8-flash-tiered' -> 'Gemini 3.8 Flash'). */
+export function formatTieredModelName(modelId: string): string {
+  const base = modelId.replace(/-tiered$/, '')
+  return base
+    .split('-')
+    .map((part) => {
+      if (/^\d+(\.\d+)*$/.test(part)) return part
+      return part.charAt(0).toUpperCase() + part.slice(1)
+    })
+    .join(' ')
+}
+
 /** Tab-completion models are discoverable but not chat-callable. */
 export function isChatCallableModelId(modelId: string): boolean {
   return !modelId.startsWith('tab_')
 }
 
 export function catalogModel(modelId: string): CatalogModel | undefined {
-  return CATALOG_BY_ID.get(modelId)
+  const existing = CATALOG_BY_ID.get(modelId)
+  if (existing) return existing
+  if (typeof modelId === 'string' && modelId.endsWith('-tiered')) {
+    return {
+      id: modelId,
+      name: formatTieredModelName(modelId),
+      contextLength: 1048576,
+      maxOutputTokens: 65536,
+      supportsReasoning: true,
+      supportsVision: true,
+      toolCalling: true,
+      thinking: 'level',
+    }
+  }
+  return undefined
 }
 
 /** Level-thinking models: single id + selectable low/medium/high via thinkingLevel. */
 export function isLevelThinkingModel(modelId: string): boolean {
-  return catalogModel(modelId)?.thinking === 'level'
+  if (catalogModel(modelId)?.thinking === 'level') return true
+  return typeof modelId === 'string' && modelId.endsWith('-tiered')
 }

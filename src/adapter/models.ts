@@ -84,10 +84,12 @@ export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
   for (const [id, entry] of Object.entries(dynamic.models ?? {})) {
     if (!isChatCallableModelId(id)) continue
     const meta = catalogModel(id)
+    const rawDisplayName = entry.displayName && entry.displayName !== id ? entry.displayName : undefined
+    const displayName = rawDisplayName ?? meta?.name ?? entry.displayName ?? entry.modelName ?? id
     entries.push({
       provider: AGY_PROVIDER,
       id,
-      name: entry.displayName ?? meta?.name ?? entry.modelName ?? id,
+      name: displayName,
       inputModalities: inputModalitiesFor(meta),
       ...(meta ? { context: { contextWindow: meta.contextLength } } : {}),
     })

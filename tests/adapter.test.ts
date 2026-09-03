@@ -567,6 +567,8 @@ describe('models', () => {
         'gemini-3.6-flash-high': { displayName: 'Gemini 3.6 Flash (High)' },
         'tab_flash_lite_preview': { displayName: 'Tab Flash' },
         'some-new-model': { displayName: 'New' },
+        'gemini-3.8-flash-tiered': { displayName: 'gemini-3.8-flash-tiered' },
+        'gemini-3.9-flash-tiered': { displayName: 'gemini-3.9-flash-tiered' },
       },
     })
     const ids = merged.map((m) => m.id)
@@ -574,6 +576,10 @@ describe('models', () => {
     expect(ids).not.toContain('tab_flash_lite_preview')
     expect(merged.find((m) => m.id === 'gemini-3.6-flash-high')?.context?.contextWindow).toBe(1048576)
     expect(merged.find((m) => m.id === 'some-new-model')?.name).toBe('New')
+    // tiered model with raw id displayName is prettified from catalog / dynamic fallback
+    expect(merged.find((m) => m.id === 'gemini-3.8-flash-tiered')?.name).toBe('Gemini 3.8 Flash')
+    expect(merged.find((m) => m.id === 'gemini-3.9-flash-tiered')?.name).toBe('Gemini 3.9 Flash')
+    expect(merged.find((m) => m.id === 'gemini-3.9-flash-tiered')?.context?.contextWindow).toBe(1048576)
   })
 
   it('falls back to catalog when the endpoint fails', async () => {
@@ -604,8 +610,16 @@ describe('models', () => {
     expect(unknown.defaultMaxTokens).toBeUndefined()
   })
 
-  it('exposes reasoning efforts for tiered models', () => {
+  it('exposes reasoning efforts for tiered models (both catalog and dynamic)', () => {
+    const resolved38 = resolveAgyModel('agy', 'gemini-3.8-flash-tiered')
+    expect(resolved38.name).toBe('Gemini 3.8 Flash')
+    expect(resolved38.reasoning).toBeDefined()
+    expect(resolved38.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
+    expect(String(resolved38.reasoning!.defaultEffort)).toBe('medium')
+    expect(resolved38.inputModalities).toEqual(['text', 'image'])
+
     const resolved = resolveAgyModel('agy', 'gemini-3.7-flash-tiered')
+    expect(resolved.name).toBe('Gemini 3.7 Flash')
     expect(resolved.reasoning).toBeDefined()
     expect(resolved.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
     expect(String(resolved.reasoning!.defaultEffort)).toBe('medium')
@@ -616,27 +630,40 @@ describe('models', () => {
     expect(tiered36.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
     expect(tiered36.inputModalities).toEqual(['text', 'image'])
 
+    // dynamically discovered uncataloged tiered model
+    const dynamicTiered = resolveAgyModel('agy', 'gemini-3.9-flash-tiered')
+    expect(dynamicTiered.name).toBe('Gemini 3.9 Flash')
+    expect(dynamicTiered.reasoning).toBeDefined()
+    expect(dynamicTiered.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
+    expect(dynamicTiered.context?.contextWindow).toBe(1048576)
+    expect(dynamicTiered.defaultMaxTokens).toBe(65536)
+    expect(dynamicTiered.inputModalities).toEqual(['text', 'image'])
+
     // legacy id-bound models and non-tiered discovered ids must not expose reasoning
-    for (const id of ['gemini-3.6-flash-high', 'gemini-2.5-flash']) {
+    for (const id of ['gemini-3.6-flash-high', 'gemini-2.5-flash', 'brand-new-model']) {
       expect(resolveAgyModel('agy', id).reasoning).toBeUndefined()
     }
   })
 
   it('maps reasoningEffort to thinkingConfig for tiered models only', () => {
-    const low = toAgyRequestBody(generateOptions({ model: 'gemini-3.7-flash-tiered', reasoningEffort: 'low' as any }), {})
+    const low = toAgyRequestBody(generateOptions({ model: 'gemini-3.8-flash-tiered', reasoningEffort: 'low' as any }), {})
     expect(low.request.generationConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'low', includeThoughts: true } })
-    const medium = toAgyRequestBody(generateOptions({ model: 'gemini-3.7-flash-tiered', reasoningEffort: 'medium' as any }), {})
+    const medium = toAgyRequestBody(generateOptions({ model: 'gemini-3.8-flash-tiered', reasoningEffort: 'medium' as any }), {})
     expect(medium.request.generationConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'medium', includeThoughts: true } })
-    const high = toAgyRequestBody(generateOptions({ model: 'gemini-3.7-flash-tiered', reasoningEffort: 'high' as any }), {})
+    const high = toAgyRequestBody(generateOptions({ model: 'gemini-3.8-flash-tiered', reasoningEffort: 'high' as any }), {})
     expect(high.request.generationConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } })
 
-    const noEffort = toAgyRequestBody(generateOptions({ model: 'gemini-3.7-flash-tiered' }), {})
+    // dynamic uncataloged tiered model also sends thinkingConfig
+    const dynamicHigh = toAgyRequestBody(generateOptions({ model: 'gemini-3.9-flash-tiered', reasoningEffort: 'high' as any }), {})
+    expect(dynamicHigh.request.generationConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } })
+
+    const noEffort = toAgyRequestBody(generateOptions({ model: 'gemini-3.8-flash-tiered' }), {})
     expect(noEffort.request.generationConfig?.thinkingConfig).toBeUndefined()
 
     const fixedModel = toAgyRequestBody(generateOptions({ model: 'gemini-3.6-flash-high', reasoningEffort: 'high' as any }), {})
     expect(fixedModel.request.generationConfig?.thinkingConfig).toBeUndefined()
 
-    const invalid = toAgyRequestBody(generateOptions({ model: 'gemini-3.7-flash-tiered', reasoningEffort: 'ultra' as any }), {})
+    const invalid = toAgyRequestBody(generateOptions({ model: 'gemini-3.8-flash-tiered', reasoningEffort: 'ultra' as any }), {})
     expect(invalid.request.generationConfig?.thinkingConfig).toBeUndefined()
   })
 })
