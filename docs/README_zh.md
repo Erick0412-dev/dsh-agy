@@ -24,9 +24,13 @@ OAuth 认证、多账号池 + 自动 429 轮换、设备指纹伪装，以及 CL
 
 ## 效果演示
 
-DSH 设置内的 Antigravity 分区——账号列表、每模型配额、单模型测试：
+DSH 设置内的 Antigravity 分区。账号邮箱与项目名已打码。
 
-![dsh-agy 设置界面](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/screenshot_zh.png)
+| 账号 | 模型 |
+|:---:|:---:|
+| ![账号](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/zh_accounts.png) | ![模型](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/zh_models.png) |
+| **限额** —— 5 小时与每周窗口 | **用量** —— 累计、按模型、按账号 |
+| ![限额](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/zh_limits.png) | ![用量](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/zh_usage.png) |
 
 ## 快速开始
 
