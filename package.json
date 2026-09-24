@@ -11,7 +11,7 @@
     "url": "git+https://github.com/chaos-03x/dsh-agy.git"
   },
   "bin": {
-    "dsh-agy": "./bin/dsh-agy.js"
+    "dsh-agy": "bin/dsh-agy.js"
   },
   "main": "./lib/index.mjs",
   "types": "./lib/index.d.mts",
@@ -44,6 +44,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json",
+    "lint": "eslint src/client",
     "test": "vitest run",
     "test:watch": "vitest",
     "record:fixtures": "tsx scripts/record-fixture.ts",
@@ -93,10 +94,13 @@
     "@types/node": "^24.0.0",
     "@types/proper-lockfile": "^4.1.4",
     "@types/react": "~18.3.1",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "react": "^18.2.0",
     "tsdown": "^0.22.14",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^3.0.0"
   },
   "exports": {
