@@ -34,6 +34,11 @@ jobs:
       # the bare command left a type error there invisible to CI. `typecheck`
       # runs both projects and is what publish.yml already used.
       - run: pnpm run typecheck
+      # Hook order is a property of CALL STRUCTURE: `tsc` cannot see it (a
+      # conditional hook is perfectly well-typed) and the suite renders nothing
+      # (`environment: 'node'`), so this is the only gate that covers it. Two
+      # white-screen bugs shipped through every other check (a39379e, 7bd096d).
+      - run: pnpm run lint
       - run: pnpm run build
       # verify the publishable artifact assembles from a clean install
       - run: npm pack --dry-run

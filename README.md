@@ -37,10 +37,14 @@ fingerprinting, and both CLI and web management.
 
 ## Screenshots
 
-The Antigravity section inside DSH Settings — accounts, per-model quota, and
-one-shot model tests:
+The Antigravity section inside DSH Settings. Account emails and project names are
+redacted.
 
-![dsh-agy settings](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/screenshot_en.png)
+| Accounts | Models |
+|:---:|:---:|
+| ![accounts](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/en_accounts.png) | ![models](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/en_models.png) |
+| **Limits** — 5-hour and weekly windows | **Usage** — cumulative, per-model and per-account |
+| ![limits](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/en_limits.png) | ![usage](https://raw.githubusercontent.com/chaos-03x/dsh-agy/main/assets/en_usage.png) |
 
 ## Quickstart
 
