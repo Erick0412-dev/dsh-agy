@@ -7,7 +7,14 @@
 import { ReasoningEffortId, type LlmModelInfo, type LlmModelReasoningInfo, type LlmResolvedModelInfo, type ModelModality } from '@deepseek-ai/dsh-llm'
 import { AGY_ENDPOINT_FALLBACKS, getAgyBootstrapUserAgent } from '../oauth/constants.ts'
 import { proxiedFetch } from '../proxy.ts'
-import { AGY_PUBLIC_MODELS, catalogModel, isChatCallableModelId, isLevelThinkingModel } from './catalog.ts'
+import {
+  AGY_PUBLIC_MODELS,
+  catalogModel,
+  isChatCallableModelId,
+  isLevelThinkingModel,
+  levelThinkingEffortsFor,
+  registerDiscoveredTieredModels,
+} from './catalog.ts'
 
 export const AGY_PROVIDER = 'agy'
 
@@ -32,6 +39,14 @@ const LEVEL_REASONING: LlmModelReasoningInfo = Object.freeze({
   efforts: Object.freeze([
     { id: ReasoningEffortId('low'), name: 'Low' },
     { id: ReasoningEffortId('medium'), name: 'Medium' },
+    { id: ReasoningEffortId('high'), name: 'High' },
+  ] as const),
+} as const)
+
+/** Reasoning levels for the Pro family (Low and High only; no Medium tier). */
+const PRO_LEVEL_REASONING: LlmModelReasoningInfo = Object.freeze({
+  efforts: Object.freeze([
+    { id: ReasoningEffortId('low'), name: 'Low' },
     { id: ReasoningEffortId('high'), name: 'High' },
   ] as const),
 } as const)
@@ -213,6 +228,9 @@ export function chatCallableDiscoveredIds(dynamic: DiscoveredModels): string[] {
 
 /** Merge dynamic ids with catalog metadata; non-chat and superseded ids are dropped, unknown ids keep minimal info. */
 export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
+  if (dynamic.tieredModelIds) {
+    registerDiscoveredTieredModels(dynamic.tieredModelIds)
+  }
   const entries: LlmModelInfo[] = []
   const hidden = hiddenDiscoveredIds(dynamic)
   for (const [id, entry] of Object.entries(dynamic.models ?? {})) {
@@ -262,6 +280,10 @@ export async function listAgyModels(
 export function resolveAgyModel(provider: string, model: string): LlmResolvedModelInfo {
   const meta = catalogModel(model)
   if (isLevelThinkingModel(model)) {
+    const efforts = levelThinkingEffortsFor(model)
+    const reasoningInfo: LlmModelReasoningInfo = efforts.length === 2
+      ? { ...PRO_LEVEL_REASONING, efforts: [...PRO_LEVEL_REASONING.efforts] }
+      : { ...LEVEL_REASONING, efforts: [...LEVEL_REASONING.efforts] }
     return {
       provider,
       id: model,
@@ -270,7 +292,7 @@ export function resolveAgyModel(provider: string, model: string): LlmResolvedMod
       context: { contextWindow: meta?.contextLength ?? 1048576 },
       defaultMaxTokens: meta?.maxOutputTokens ?? 65536,
       // Return a shallow copy so callers cannot mutate the frozen singleton.
-      reasoning: { ...LEVEL_REASONING, efforts: [...LEVEL_REASONING.efforts] },
+      reasoning: reasoningInfo,
     }
   }
   return {

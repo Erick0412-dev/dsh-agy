@@ -18,6 +18,8 @@ export interface CatalogModel {
   toolCalling?: boolean
   /** Level-thinking: 'level' means single id + selectable low/medium/high via thinkingLevel. Omit = level bound to id. */
   thinking?: 'level'
+  /** The reasoning levels this model exposes when thinking is 'level' (default: low/medium/high). */
+  thinkingLevels?: readonly ('low' | 'medium' | 'high')[]
 }
 
 export const AGY_PUBLIC_MODELS: readonly CatalogModel[] = [
@@ -35,7 +37,7 @@ export const AGY_PUBLIC_MODELS: readonly CatalogModel[] = [
   { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)', contextLength: 1048576, maxOutputTokens: 64000, supportsReasoning: true, supportsVision: true, toolCalling: true },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)', contextLength: 1048576, maxOutputTokens: 64000, supportsReasoning: true, supportsVision: true, toolCalling: true },
   { id: 'gemini-pro-agent', name: 'Gemini 3.1 Pro (High)', contextLength: 1048576, maxOutputTokens: 65535, supportsReasoning: true, supportsVision: true, toolCalling: true },
-  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)', contextLength: 1048576, maxOutputTokens: 65535, supportsReasoning: true, supportsVision: true, toolCalling: true },
+  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)', contextLength: 1048576, maxOutputTokens: 65535, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level', thinkingLevels: ['low', 'high'] as const },
   { id: 'gemini-3-flash-agent', name: 'Gemini 3.5 Flash (High)', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true },
   { id: 'gemini-3.5-flash-low', name: 'Gemini 3.5 Flash (Medium)', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true },
   { id: 'gemini-3.5-flash-extra-low', name: 'Gemini 3.5 Flash (Low)', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true },
@@ -93,23 +95,55 @@ export function catalogModel(modelId: string): CatalogModel | undefined {
   return undefined
 }
 
+/** Dynamically discovered tiered models and their family ('flash', 'pro', 'flashLite', etc.). */
+const DISCOVERED_TIERED_FAMILIES = new Map<string, string>()
+
+/**
+ * Register tiered models advertised by `fetchAvailableModels`'s `tieredModelIds`.
+ *
+ * Upstream groups tiered models by family (e.g. `{ flash: [...], pro: ['gemini-3.1-pro-low'], flashLite: [...] }`).
+ * Registering them allows dynamic tiered models to be recognized without relying on the `-tiered` suffix.
+ */
+export function registerDiscoveredTieredModels(tiered?: Record<string, string[]> | null): void {
+  if (!tiered || typeof tiered !== 'object' || Array.isArray(tiered)) return
+  for (const [family, ids] of Object.entries(tiered)) {
+    if (!Array.isArray(ids)) continue
+    for (const id of ids) {
+      if (typeof id === 'string' && id.length > 0) {
+        DISCOVERED_TIERED_FAMILIES.set(id, family.toLowerCase())
+      }
+    }
+  }
+}
+
+/** Reset discovered tiered models (used by test suites). */
+export function resetDiscoveredTieredModels(): void {
+  DISCOVERED_TIERED_FAMILIES.clear()
+}
+
 /**
  * Level-thinking models: a single id with selectable tiers via `thinkingLevel`.
  *
- * KNOWN GAP (tracked in issue #47, with the measurements): upstream publishes the
- * authoritative grouping as `tieredModelIds` in every `fetchAvailableModels`
- * response — `{ flashLite: [...], flash: [...], pro: ['gemini-3.1-pro-low'] }` —
- * and this rule ignores it. The `-tiered` suffix is a NAMING COINCIDENCE that
- * happens to hold for the three Flash ids, so:
- *   - upstream-tiered `gemini-3.1-pro-low` (which does accept `thinkingLevel`,
- *     measured) is treated as id-bound and never shows a tier selector;
- *   - a tiered model added under any other name is silently excluded — no log,
- *     no warning, it simply appears without tiers.
- * The fix is to consult `tieredModelIds` with this function as the offline
- * fallback, and to let the budget card render the tiers a family actually has
- * (Flash: low/medium/high; Pro: low/high only).
+ * Consults dynamically discovered `tieredModelIds` first, falling back to the catalog's
+ * explicit `thinking: 'level'` metadata and the legacy `-tiered` naming suffix for offline use.
  */
 export function isLevelThinkingModel(modelId: string): boolean {
   if (catalogModel(modelId)?.thinking === 'level') return true
+  if (DISCOVERED_TIERED_FAMILIES.has(modelId)) return true
   return typeof modelId === 'string' && modelId.endsWith('-tiered')
+}
+
+/**
+ * The reasoning levels supported by a level-thinking model.
+ *
+ * Flash family exposes low/medium/high; Pro family exposes low/high only
+ * (measured: Pro models reject medium thinking levels).
+ */
+export function levelThinkingEffortsFor(modelId: string): readonly ('low' | 'medium' | 'high')[] {
+  const family = DISCOVERED_TIERED_FAMILIES.get(modelId)
+  if (family === 'pro') return ['low', 'high']
+  const cat = catalogModel(modelId)
+  if (cat?.thinkingLevels) return cat.thinkingLevels
+  if (modelId.includes('pro')) return ['low', 'high']
+  return ['low', 'medium', 'high']
 }
