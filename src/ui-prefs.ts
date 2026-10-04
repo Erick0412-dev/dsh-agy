@@ -25,6 +25,9 @@ export function sanitizeUiPrefs(raw: unknown): UiPrefsDocument {
   if (typeof obj.conversationBadge === 'boolean') {
     doc.conversationBadge = obj.conversationBadge
   }
+  if (typeof obj.detailedQuotaReset === 'boolean') {
+    doc.detailedQuotaReset = obj.detailedQuotaReset
+  }
   return doc
 }
 
@@ -54,6 +57,7 @@ export class UiPrefsStore {
     this.reloadIfChanged()
     return {
       conversationBadge: this.doc.conversationBadge === true,
+      detailedQuotaReset: this.doc.detailedQuotaReset === true,
     }
   }
 
@@ -62,15 +66,20 @@ export class UiPrefsStore {
     const next: UiPrefsDocument = {
       version: UI_PREFS_VERSION,
       ...(this.doc.conversationBadge !== undefined ? { conversationBadge: this.doc.conversationBadge } : {}),
+      ...(this.doc.detailedQuotaReset !== undefined ? { detailedQuotaReset: this.doc.detailedQuotaReset } : {}),
     }
     if (typeof prefs.conversationBadge === 'boolean') {
       next.conversationBadge = prefs.conversationBadge
+    }
+    if (typeof prefs.detailedQuotaReset === 'boolean') {
+      next.detailedQuotaReset = prefs.detailedQuotaReset
     }
     this.write(next)
     this.doc = next
     this.raw = UiPrefsStore.serialize(next)
     return {
       conversationBadge: next.conversationBadge === true,
+      detailedQuotaReset: next.detailedQuotaReset === true,
     }
   }
 

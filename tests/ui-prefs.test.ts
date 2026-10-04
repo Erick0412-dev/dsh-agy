@@ -19,13 +19,15 @@ describe('ui-prefs parser and sanitizer', () => {
   })
 
   it('keeps valid boolean flags', () => {
-    expect(sanitizeUiPrefs({ conversationBadge: true })).toEqual({
+    expect(sanitizeUiPrefs({ conversationBadge: true, detailedQuotaReset: true })).toEqual({
       version: UI_PREFS_VERSION,
       conversationBadge: true,
+      detailedQuotaReset: true,
     })
-    expect(sanitizeUiPrefs({ conversationBadge: false })).toEqual({
+    expect(sanitizeUiPrefs({ conversationBadge: false, detailedQuotaReset: false })).toEqual({
       version: UI_PREFS_VERSION,
       conversationBadge: false,
+      detailedQuotaReset: false,
     })
   })
 
@@ -39,7 +41,7 @@ describe('UiPrefsStore', () => {
     const file = join(tmpdir(), `agy-ui-prefs-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
     try {
       const store = new UiPrefsStore(file)
-      expect(store.get()).toEqual({ conversationBadge: false })
+      expect(store.get()).toEqual({ conversationBadge: false, detailedQuotaReset: false })
     } finally {
       if (existsSync(file)) rmSync(file)
     }
@@ -59,10 +61,17 @@ describe('UiPrefsStore', () => {
       const store2 = new UiPrefsStore(file)
       expect(store2.get().conversationBadge).toBe(true)
 
+      // Toggle detailedQuotaReset on
+      const withDetailed = store.set({ detailedQuotaReset: true })
+      expect(withDetailed.detailedQuotaReset).toBe(true)
+      expect(store2.get().detailedQuotaReset).toBe(true)
+
       // Toggle back off
-      const turnedOff = store.set({ conversationBadge: false })
+      const turnedOff = store.set({ conversationBadge: false, detailedQuotaReset: false })
       expect(turnedOff.conversationBadge).toBe(false)
+      expect(turnedOff.detailedQuotaReset).toBe(false)
       expect(store2.get().conversationBadge).toBe(false)
+      expect(store2.get().detailedQuotaReset).toBe(false)
     } finally {
       if (existsSync(file)) rmSync(file)
     }

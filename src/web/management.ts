@@ -658,12 +658,16 @@ export function createAgyManagement(options: AgyManagementOptions): AgyManagemen
     'ui.prefs.get': async () => uiPrefs.get(),
 
     'ui.prefs.set': async (payload) => {
-      const body = payload as { conversationBadge?: unknown } | undefined
+      const body = payload as { conversationBadge?: unknown; detailedQuotaReset?: unknown } | undefined
       if (body?.conversationBadge !== undefined && typeof body.conversationBadge !== 'boolean') {
         fail('conversationBadge must be a boolean')
       }
+      if (body?.detailedQuotaReset !== undefined && typeof body.detailedQuotaReset !== 'boolean') {
+        fail('detailedQuotaReset must be a boolean')
+      }
       return uiPrefs.set({
         conversationBadge: body?.conversationBadge as boolean | undefined,
+        detailedQuotaReset: body?.detailedQuotaReset as boolean | undefined,
       })
     },
   }
