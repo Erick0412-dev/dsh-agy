@@ -139,6 +139,64 @@ function groupDisplayRank(name: string): number {
 }
 
 /**
+ * Calibrate the 5-hour Gemini window using live per-model quota discovery.
+ *
+ * When Gemini quota is recovered from a fallback endpoint (e.g. production) because
+ * the primary endpoint (daily) omitted Gemini from `retrieveUserQuotaSummary`, the
+ * fallback endpoint's 5-hour reading is often static (100%) because consumer generation
+ * traffic is routed exclusively to the primary endpoint. In contrast, the primary
+ * endpoint's `fetchAvailableModels` accurately reports the active 5-hour consumption
+ * and reset time across all Gemini models.
+ *
+ * This helper calibrates the Gemini group's 5-hour window with the minimum
+ * remainingFraction and earliest resetTime across all Gemini models in `discovered`.
+ */
+export function calibrateGeminiQuota(
+  groups: QuotaGroup[],
+  discovered: { models?: Record<string, { quotaInfo?: { remainingFraction?: unknown; resetTime?: unknown } }> } | null | undefined,
+): QuotaGroup[] {
+  if (!discovered?.models) return groups
+
+  let minRemaining: number | null = null
+  let earliestReset: string | undefined = undefined
+
+  for (const [id, entry] of Object.entries(discovered.models)) {
+    if (!id.startsWith('gemini-') && !id.startsWith('gemma-')) continue
+    const rem = typeof entry.quotaInfo?.remainingFraction === 'number' && Number.isFinite(entry.quotaInfo.remainingFraction)
+      ? Math.max(0, Math.min(1, entry.quotaInfo.remainingFraction))
+      : null
+    if (rem !== null) {
+      if (minRemaining === null || rem < minRemaining) {
+        minRemaining = rem
+      }
+    }
+    if (typeof entry.quotaInfo?.resetTime === 'string' && entry.quotaInfo.resetTime !== '') {
+      if (!earliestReset || Date.parse(entry.quotaInfo.resetTime) < Date.parse(earliestReset)) {
+        earliestReset = entry.quotaInfo.resetTime
+      }
+    }
+  }
+
+  if (minRemaining === null) return groups
+
+  return groups.map((group) => {
+    const lower = group.name.toLowerCase()
+    if (!lower.includes('gemini') && !lower.includes('google')) return group
+    return {
+      ...group,
+      windows: group.windows.map((w) => {
+        if (w.window !== '5h' && !w.bucketId.toLowerCase().includes('5h')) return w
+        return {
+          ...w,
+          remainingFraction: minRemaining,
+          resetTime: earliestReset ?? w.resetTime,
+        }
+      }),
+    }
+  })
+}
+
+/**
  * Merge newly discovered groups into an existing accumulator.
  * Existing groups are preserved, and missing groups (deduplicated by case-insensitive name)
  * are appended, followed by sorting in canonical display order (Gemini first).
@@ -172,6 +230,11 @@ export function mergeQuotaGroups(accumulated: QuotaGroup[], incoming: QuotaGroup
  * to merge and recover missing groups. Probing stops as soon as Gemini quota is
  * present in the accumulated set.
  *
+ * DYNAMIC QUOTA CALIBRATION: When Gemini Models is recovered from a fallback endpoint
+ * instead of the primary endpoint, its 5-hour window may read static 100% because
+ * consumer traffic is routed to daily. When this skew is detected, the 5-hour window
+ * is calibrated against active Gemini models in `fetchAvailableModels`.
+ *
  * @param accessToken - a live access token for the account.
  * @param projectId - the account's Cloud Code project id, when known.
  * @param fetchImpl - routed, time-bounded fetch implementation.
@@ -185,6 +248,8 @@ export async function fetchQuotaSummary(
 ): Promise<QuotaGroup[]> {
   const body = JSON.stringify(projectId ? { project: projectId } : {})
   let accumulated: QuotaGroup[] = []
+  let primaryHadGemini = false
+  let firstEndpointAnswered = false
 
   for (const baseEndpoint of AGY_ENDPOINT_FALLBACKS) {
     try {
@@ -201,15 +266,35 @@ export async function fetchQuotaSummary(
       const groups = parseQuotaSummary(await response.json())
       if (groups.length === 0) continue
 
+      if (!firstEndpointAnswered) {
+        firstEndpointAnswered = true
+        if (hasGeminiQuotaGroup(groups)) {
+          primaryHadGemini = true
+        }
+      }
+
       accumulated = mergeQuotaGroups(accumulated, groups)
 
       // Stop fallback probing once the core Gemini group is captured.
       if (hasGeminiQuotaGroup(accumulated)) {
-        return accumulated
+        break
       }
     } catch {
       // Try the next endpoint; the caller treats an empty result as "unknown".
     }
   }
+
+  // When Gemini quota was missing on the primary endpoint and recovered from a fallback,
+  // calibrate its 5-hour window using active model quota from fetchAvailableModels.
+  if (!primaryHadGemini && hasGeminiQuotaGroup(accumulated)) {
+    try {
+      const { fetchAvailableModels } = await import('./models.ts')
+      const discovered = await fetchAvailableModels(accessToken, projectId, fetchImpl)
+      accumulated = calibrateGeminiQuota(accumulated, discovered)
+    } catch {
+      // Graceful degradation: keep the recovered fallback groups as-is.
+    }
+  }
+
   return accumulated
 }

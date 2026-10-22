@@ -34,7 +34,7 @@ import {
   generateAntigravityRequestId,
 } from '../src/runtime/identity.ts'
 import { _clearVersionCacheForTest, resolveAntigravityVersion } from '../src/runtime/version.ts'
-import { fetchQuotaSummary, hasGeminiQuotaGroup, mergeQuotaGroups, parseQuotaSummary } from '../src/adapter/quota-summary.ts'
+import { calibrateGeminiQuota, fetchQuotaSummary, hasGeminiQuotaGroup, mergeQuotaGroups, parseQuotaSummary } from '../src/adapter/quota-summary.ts'
 import {
   FAMILY_UNKNOWN,
   familiesForBucketId,
@@ -1084,9 +1084,19 @@ describe('quota summary (5h / weekly windows)', () => {
     })
 
     const calledUrls: string[] = []
+    const modelsPayload = JSON.stringify({
+      models: {
+        'gemini-3.8-flash-tiered': {
+          quotaInfo: { remainingFraction: 0.88, resetTime: '2026-10-22T16:00:00Z' },
+        },
+      },
+    })
     const mockFetch = vi.fn(async (url: string | URL | Request) => {
       const urlStr = String(url)
       calledUrls.push(urlStr)
+      if (urlStr.includes('/v1internal:fetchAvailableModels')) {
+        return new Response(modelsPayload, { status: 200 })
+      }
       if (urlStr.includes('daily-cloudcode-pa.googleapis.com')) {
         return new Response(dailyPayload, { status: 200 })
       }
@@ -1098,7 +1108,14 @@ describe('quota summary (5h / weekly windows)', () => {
 
     const groups = await fetchQuotaSummary('fake-token', 'proj-1', mockFetch)
     expect(groups.map((g) => g.name)).toEqual(['Gemini Models', 'Claude and GPT models'])
-    expect(calledUrls).toHaveLength(2)
+    expect(calledUrls).toHaveLength(3)
+    // 5h window was calibrated from fetchAvailableModels
+    expect(groups[0]!.windows[0]).toEqual({
+      bucketId: 'gemini-5h',
+      window: '5h',
+      remainingFraction: 0.88,
+      resetTime: '2026-10-22T16:00:00Z',
+    })
   })
 
   it('fetchQuotaSummary returns immediately when first endpoint has Gemini quota', async () => {
@@ -1120,6 +1137,61 @@ describe('quota summary (5h / weekly windows)', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0]!.name).toBe('Gemini Models')
     expect(calledUrls).toHaveLength(1)
+  })
+
+  it('calibrateGeminiQuota updates 5-hour window from discovered Gemini models', () => {
+    const rawGroups = parseQuotaSummary({
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { bucketId: 'gemini-5h', window: '5h', remainingFraction: 1, resetTime: '2026-10-22T18:00:00Z' },
+            { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 1, resetTime: '2026-10-29T00:00:00Z' },
+          ],
+        },
+      ],
+    })
+    const discovered = {
+      models: {
+        'gemini-3.8-flash-tiered': {
+          quotaInfo: { remainingFraction: 0.85, resetTime: '2026-10-22T16:30:00Z' },
+        },
+        'gemini-2.5-pro': {
+          quotaInfo: { remainingFraction: 0.9, resetTime: '2026-10-22T16:35:00Z' },
+        },
+        'claude-sonnet-4-6': {
+          quotaInfo: { remainingFraction: 0.5, resetTime: '2026-10-22T15:00:00Z' },
+        },
+      },
+    }
+
+    const calibrated = calibrateGeminiQuota(rawGroups, discovered)
+    expect(calibrated[0]!.windows[0]).toEqual({
+      bucketId: 'gemini-5h',
+      window: '5h',
+      remainingFraction: 0.85,
+      resetTime: '2026-10-22T16:30:00Z',
+    })
+    // Weekly window is preserved unchanged
+    expect(calibrated[0]!.windows[1]).toEqual({
+      bucketId: 'gemini-weekly',
+      window: 'weekly',
+      remainingFraction: 1,
+      resetTime: '2026-10-29T00:00:00Z',
+    })
+  })
+
+  it('calibrateGeminiQuota handles null/empty discovery gracefully', () => {
+    const rawGroups = parseQuotaSummary({
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 1 }],
+        },
+      ],
+    })
+    expect(calibrateGeminiQuota(rawGroups, null)).toEqual(rawGroups)
+    expect(calibrateGeminiQuota(rawGroups, { models: {} })).toEqual(rawGroups)
   })
 })
 
