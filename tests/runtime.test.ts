@@ -34,7 +34,7 @@ import {
   generateAntigravityRequestId,
 } from '../src/runtime/identity.ts'
 import { _clearVersionCacheForTest, resolveAntigravityVersion } from '../src/runtime/version.ts'
-import { parseQuotaSummary } from '../src/adapter/quota-summary.ts'
+import { fetchQuotaSummary, hasGeminiQuotaGroup, mergeQuotaGroups, parseQuotaSummary } from '../src/adapter/quota-summary.ts'
 import {
   FAMILY_UNKNOWN,
   familiesForBucketId,
@@ -1019,6 +1019,107 @@ describe('quota summary (5h / weekly windows)', () => {
       }],
     })
     expect(groups[0]!.windows.map((w) => w.bucketId)).toEqual(['ok'])
+  })
+
+  it('detects presence of Gemini groups via name or bucket ids', () => {
+    expect(hasGeminiQuotaGroup([])).toBe(false)
+    expect(hasGeminiQuotaGroup([
+      { name: 'Claude and GPT models', windows: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 1, resetTime: null }] },
+    ])).toBe(false)
+    expect(hasGeminiQuotaGroup([
+      { name: 'Gemini Models', windows: [{ bucketId: 'custom-5h', window: '5h', remainingFraction: 1, resetTime: null }] },
+    ])).toBe(true)
+    expect(hasGeminiQuotaGroup([
+      { name: 'Custom Group', windows: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 1, resetTime: null }] },
+    ])).toBe(true)
+  })
+
+  it('merges quota groups across endpoints and preserves canonical Gemini-first order', () => {
+    const claudeOnly = parseQuotaSummary({
+      groups: [
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 0.9 }],
+        },
+      ],
+    })
+    const geminiAndClaude = parseQuotaSummary({
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.8 }],
+        },
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 0.5 }],
+        },
+      ],
+    })
+
+    const merged = mergeQuotaGroups(claudeOnly, geminiAndClaude)
+    expect(merged.map((g) => g.name)).toEqual(['Gemini Models', 'Claude and GPT models'])
+    expect(merged[1]!.windows[0]!.remainingFraction).toBe(0.9)
+  })
+
+  it('fetchQuotaSummary probes subsequent endpoints to recover missing Gemini quota', async () => {
+    const dailyPayload = JSON.stringify({
+      groups: [
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 0.95 }],
+        },
+      ],
+    })
+    const prodPayload = JSON.stringify({
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 1 }],
+        },
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 0.95 }],
+        },
+      ],
+    })
+
+    const calledUrls: string[] = []
+    const mockFetch = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = String(url)
+      calledUrls.push(urlStr)
+      if (urlStr.includes('daily-cloudcode-pa.googleapis.com')) {
+        return new Response(dailyPayload, { status: 200 })
+      }
+      if (urlStr.includes('cloudcode-pa.googleapis.com')) {
+        return new Response(prodPayload, { status: 200 })
+      }
+      return new Response('Not found', { status: 404 })
+    }) as unknown as typeof fetch
+
+    const groups = await fetchQuotaSummary('fake-token', 'proj-1', mockFetch)
+    expect(groups.map((g) => g.name)).toEqual(['Gemini Models', 'Claude and GPT models'])
+    expect(calledUrls).toHaveLength(2)
+  })
+
+  it('fetchQuotaSummary returns immediately when first endpoint has Gemini quota', async () => {
+    const fullPayload = JSON.stringify({
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 1 }],
+        },
+      ],
+    })
+    const calledUrls: string[] = []
+    const mockFetch = vi.fn(async (url: string | URL | Request) => {
+      calledUrls.push(String(url))
+      return new Response(fullPayload, { status: 200 })
+    }) as unknown as typeof fetch
+
+    const groups = await fetchQuotaSummary('fake-token', undefined, mockFetch)
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.name).toBe('Gemini Models')
+    expect(calledUrls).toHaveLength(1)
   })
 })
 

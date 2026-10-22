@@ -115,12 +115,62 @@ export function parseQuotaSummary(raw: unknown): QuotaGroup[] {
 }
 
 /**
+ * Check whether a quota group list contains a Gemini group.
+ * A group counts as Gemini if its name mentions 'gemini' or 'google',
+ * or any bucket id contains 'gemini'.
+ */
+export function hasGeminiQuotaGroup(groups: readonly QuotaGroup[]): boolean {
+  return groups.some((g) => {
+    const name = g.name.toLowerCase()
+    if (name.includes('gemini') || name.includes('google')) return true
+    return g.windows.some((w) => w.bucketId.toLowerCase().includes('gemini'))
+  })
+}
+
+/**
+ * Display sort order: Gemini first, then third-party (Claude/GPT), then anything else.
+ * Preserves upstream's canonical display order where Gemini appears before 3P groups.
+ */
+function groupDisplayRank(name: string): number {
+  const lower = name.toLowerCase()
+  if (lower.includes('gemini') || lower.includes('google')) return 0
+  if (lower.includes('claude') || lower.includes('gpt') || lower.includes('3p')) return 1
+  return 2
+}
+
+/**
+ * Merge newly discovered groups into an existing accumulator.
+ * Existing groups are preserved, and missing groups (deduplicated by case-insensitive name)
+ * are appended, followed by sorting in canonical display order (Gemini first).
+ */
+export function mergeQuotaGroups(accumulated: QuotaGroup[], incoming: QuotaGroup[]): QuotaGroup[] {
+  const merged = [...accumulated]
+  for (const group of incoming) {
+    const key = group.name.trim().toLowerCase()
+    const exists = merged.some((g) => g.name.trim().toLowerCase() === key)
+    if (!exists) {
+      merged.push(group)
+    }
+  }
+  merged.sort((a, b) => groupDisplayRank(a.name) - groupDisplayRank(b.name) || a.name.localeCompare(b.name))
+  return merged
+}
+
+/**
  * Fetch and parse the grouped windows for one account.
  *
  * Mirrors `fetchAvailableModels`: the endpoint fallback chain is walked here, and
  * the caller injects only the routed+time-bounded fetch, so the account's proxy
  * is honoured (omitting it would go direct and leak the account's real IP) and
  * one shared budget bounds both calls.
+ *
+ * RESILIENCE AGAINST ENDPOINT SKEW: Upstream endpoints may return partial group
+ * sets. For instance, `daily-cloudcode-pa.googleapis.com` can omit `Gemini Models`
+ * and return only `Claude and GPT models`, while production `cloudcode-pa.googleapis.com`
+ * returns both. We accumulate groups across fallback endpoints: if the first
+ * answering endpoint lacks the core Gemini group, subsequent endpoints are probed
+ * to merge and recover missing groups. Probing stops as soon as Gemini quota is
+ * present in the accumulated set.
  *
  * @param accessToken - a live access token for the account.
  * @param projectId - the account's Cloud Code project id, when known.
@@ -134,6 +184,8 @@ export async function fetchQuotaSummary(
   fetchImpl: typeof fetch = proxiedFetch,
 ): Promise<QuotaGroup[]> {
   const body = JSON.stringify(projectId ? { project: projectId } : {})
+  let accumulated: QuotaGroup[] = []
+
   for (const baseEndpoint of AGY_ENDPOINT_FALLBACKS) {
     try {
       const response = await fetchImpl(`${baseEndpoint}${QUOTA_SUMMARY_PATH}`, {
@@ -146,10 +198,18 @@ export async function fetchQuotaSummary(
         body,
       })
       if (!response.ok) continue
-      return parseQuotaSummary(await response.json())
+      const groups = parseQuotaSummary(await response.json())
+      if (groups.length === 0) continue
+
+      accumulated = mergeQuotaGroups(accumulated, groups)
+
+      // Stop fallback probing once the core Gemini group is captured.
+      if (hasGeminiQuotaGroup(accumulated)) {
+        return accumulated
+      }
     } catch {
       // Try the next endpoint; the caller treats an empty result as "unknown".
     }
   }
-  return []
+  return accumulated
 }
