@@ -1674,4 +1674,25 @@ describe('fingerprint version freshness', () => {
       expect(probed[0]).toBe(await dispatcherForAsync(proxyUrl))
     })
   }, 5_000)
+
+  describe('account model capability routing', () => {
+    it('isModelSupportedByAccount filters models correctly based on cachedModels', async () => {
+      const { isModelSupportedByAccount } = await import('../src/session.ts')
+      const accWithModels: ManagedAccount = {
+        refresh: 'r',
+        addedAt: 1,
+        lastUsed: 1,
+        cachedModels: ['gemini-2.5-flash', 'claude-3-5-sonnet', 'gemini-3.8-flash-high'],
+      }
+      expect(isModelSupportedByAccount(accWithModels, 'gemini-2.5-flash')).toBe(true)
+      expect(isModelSupportedByAccount(accWithModels, 'claude-3-5-sonnet')).toBe(true)
+      expect(isModelSupportedByAccount(accWithModels, 'claude-3-7-sonnet')).toBe(false)
+      expect(isModelSupportedByAccount(accWithModels, 'gemini-4-argon-high')).toBe(false)
+      expect(isModelSupportedByAccount(accWithModels, 'gemini-3.8-flash-tiered')).toBe(true)
+
+      // unprobed account optimistic fallback
+      const unprobed: ManagedAccount = { refresh: 'r', addedAt: 1, lastUsed: 1 }
+      expect(isModelSupportedByAccount(unprobed, 'claude-3-7-sonnet')).toBe(true)
+    })
+  })
 })
