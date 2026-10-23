@@ -15,6 +15,8 @@ const VERSION_FETCH_TIMEOUT_MS = 5_000
 const IDE_RELEASE_FEED_URL = 'https://antigravity-auto-updater-974169037036.us-central1.run.app/releases'
 /** Source 2: agy CLI GitHub releases (object with tag_name). */
 const CLI_RELEASE_URL = 'https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest'
+/** Source 3: Antigravity Hub updater manifest (yaml with version: string). */
+export const HUB_MANIFEST_URL = 'https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml'
 
 export interface FetchLike {
   (input: string | URL, init?: RequestInit): Promise<Response>
@@ -75,19 +77,22 @@ function parseCliRelease(payload: unknown): string | null {
   return pickNewestVersion(release.tag_name ?? release.name)
 }
 
+function parseHubManifest(payload: unknown): string | null {
+  if (typeof payload !== 'string') return null
+  const match = payload.match(/^version:\s*(\d+\.\d+\.\d+)\s*$/m)
+  return match?.[1] ?? null
+}
+
 async function fetchJsonWithTimeout(fetchImpl: FetchLike, url: string): Promise<unknown> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), VERSION_FETCH_TIMEOUT_MS)
   try {
     const response = await fetchImpl(url, {
-      // Both feeds are services the official Antigravity client ecosystem
-      // already talks to, so the client User-Agent is the consistent choice.
-      // This previously sent a hardcoded `dsh-agy/0.1` — a self-identifying
-      // string that also never tracked the package version.
-      headers: { Accept: 'application/json', 'User-Agent': antigravityUserAgent() },
+      headers: { Accept: '*/*', 'User-Agent': antigravityUserAgent() },
       signal: controller.signal,
     })
     if (!response.ok) throw new Error(`Version source ${url} returned ${response.status}`)
+    if (url.endsWith('.yml') || url.endsWith('.yaml')) return response.text()
     return response.json()
   } finally {
     clearTimeout(timeoutId)
@@ -172,6 +177,8 @@ export async function resolveAntigravityCliVersion(fetchImpl: FetchLike = proxie
  * the fallback is the value under test.
  */
 export async function resolveObservedAgyVersion(fetchImpl: FetchLike = proxiedFetch): Promise<string | undefined> {
+  const hub = await resolveObservedVersion(hubState, HUB_MANIFEST_URL, parseHubManifest, fetchImpl)
+  if (hub) return hub
   return (await resolveObservedVersion(cliState, CLI_RELEASE_URL, parseCliRelease, fetchImpl)) ?? undefined
 }
 
@@ -210,7 +217,7 @@ export async function resolveAntigravityVersionBounded(
 /** Synchronously peek at a fresh cached version (no network). */
 export function peekCachedAntigravityVersion(): string | undefined {
   const now = Date.now()
-  for (const state of [cliState, ideState]) {
+  for (const state of [hubState, cliState, ideState]) {
     if (state.cache && now - state.cache.fetchedAt < VERSION_CACHE_TTL_MS) {
       // A fresh cache is an observation too — publish it so a synchronous peek
       // (the fingerprint failure path) reaches User-Agent builders without I/O.
@@ -221,6 +228,7 @@ export function peekCachedAntigravityVersion(): string | undefined {
   return undefined
 }
 
+const hubState: VersionState = { inFlight: null }
 const ideState: VersionState = { inFlight: null }
 const cliState: VersionState = { inFlight: null }
 
@@ -235,8 +243,10 @@ const cliState: VersionState = { inFlight: null }
  * process state, and dropping it would let a test's User-Agent move backwards.
  */
 export function _clearVersionCacheForTest(): void {
+  hubState.cache = undefined
   ideState.cache = undefined
   cliState.cache = undefined
+  hubState.inFlight = null
   ideState.inFlight = null
   cliState.inFlight = null
 }

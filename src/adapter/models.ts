@@ -57,6 +57,8 @@ export interface DiscoveredModelEntry {
   }
   displayName?: string
   modelName?: string
+  maxTokens?: number
+  maxOutputTokens?: number
 }
 
 export interface DeprecatedModelInfo {
@@ -166,6 +168,10 @@ function hiddenDiscoveredIds(dynamic: DiscoveredModels): Set<string> {
       hidden.add(retiredId)
     }
   }
+  for (const id of Object.keys(models)) {
+    const m = /^(.*)-(?:low|medium|high)$/.exec(id)
+    if (m && Object.hasOwn(models, `${m[1]}-tiered`)) hidden.add(id)
+  }
   return hidden
 }
 
@@ -220,12 +226,15 @@ export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
     const meta = catalogModel(id)
     const rawDisplayName = entry.displayName && entry.displayName !== id ? entry.displayName : undefined
     const displayName = rawDisplayName ?? meta?.name ?? entry.displayName ?? entry.modelName ?? id
+    const contextWindow =
+      meta?.contextLength ??
+      (typeof entry.maxTokens === 'number' && entry.maxTokens > 0 ? entry.maxTokens : undefined)
     entries.push({
       provider: AGY_PROVIDER,
       id,
       name: displayName,
       inputModalities: inputModalitiesFor(meta),
-      ...(meta ? { context: { contextWindow: meta.contextLength } } : {}),
+      ...(contextWindow !== undefined ? { context: { contextWindow } } : {}),
     })
   }
   return entries
