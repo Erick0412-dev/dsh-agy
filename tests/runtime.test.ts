@@ -1193,6 +1193,69 @@ describe('quota summary (5h / weekly windows)', () => {
     expect(calibrateGeminiQuota(rawGroups, null)).toEqual(rawGroups)
     expect(calibrateGeminiQuota(rawGroups, { models: {} })).toEqual(rawGroups)
   })
+
+  it('calibrateGeminiQuota synthesizes Gemini Models when group is omitted', () => {
+    const claudeOnly = parseQuotaSummary({
+      groups: [
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 0.95 }],
+        },
+      ],
+    })
+    const discovered = {
+      models: {
+        'gemini-3.8-flash-tiered': {
+          quotaInfo: { remainingFraction: 0.72, resetTime: '2026-10-23T18:00:00Z' },
+        },
+      },
+    }
+
+    const result = calibrateGeminiQuota(claudeOnly, discovered)
+    expect(result).toHaveLength(2)
+    expect(result[0]!.name).toBe('Gemini Models')
+    expect(result[0]!.windows).toEqual([
+      {
+        bucketId: 'gemini-5h',
+        window: '5h',
+        remainingFraction: 0.72,
+        resetTime: '2026-10-23T18:00:00Z',
+      },
+    ])
+    expect(result[1]!.name).toBe('Claude and GPT models')
+  })
+
+  it('fetchQuotaSummary synthesizes Gemini Models when all endpoints omit it', async () => {
+    const claudePayload = JSON.stringify({
+      groups: [
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 1 }],
+        },
+      ],
+    })
+    const modelsPayload = JSON.stringify({
+      models: {
+        'gemini-3.8-flash-tiered': {
+          quotaInfo: { remainingFraction: 0.65, resetTime: '2026-10-23T19:00:00Z' },
+        },
+      },
+    })
+
+    const mockFetch = vi.fn(async (url: string | URL | Request) => {
+      const urlStr = String(url)
+      if (urlStr.includes('/v1internal:fetchAvailableModels')) {
+        return new Response(modelsPayload, { status: 200 })
+      }
+      return new Response(claudePayload, { status: 200 })
+    }) as unknown as typeof fetch
+
+    const groups = await fetchQuotaSummary('fake-token', undefined, mockFetch)
+    expect(groups).toHaveLength(2)
+    expect(groups[0]!.name).toBe('Gemini Models')
+    expect(groups[0]!.windows[0]!.remainingFraction).toBe(0.65)
+    expect(groups[1]!.name).toBe('Claude and GPT models')
+  })
 })
 
 describe('family quota helpers', () => {

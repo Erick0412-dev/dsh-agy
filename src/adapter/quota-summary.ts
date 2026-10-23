@@ -139,17 +139,20 @@ function groupDisplayRank(name: string): number {
 }
 
 /**
- * Calibrate the 5-hour Gemini window using live per-model quota discovery.
+ * Calibrate the 5-hour Gemini window using live per-model quota discovery, or
+ * synthesize a 'Gemini Models' group if upstream omitted it entirely.
  *
  * When Gemini quota is recovered from a fallback endpoint (e.g. production) because
  * the primary endpoint (daily) omitted Gemini from `retrieveUserQuotaSummary`, the
  * fallback endpoint's 5-hour reading is often static (100%) because consumer generation
- * traffic is routed exclusively to the primary endpoint. In contrast, the primary
+ * traffic is routed exclusively to the primary endpoint. Furthermore, upstream endpoints
+ * may completely omit Gemini quota across all endpoints. In contrast, the primary
  * endpoint's `fetchAvailableModels` accurately reports the active 5-hour consumption
  * and reset time across all Gemini models.
  *
- * This helper calibrates the Gemini group's 5-hour window with the minimum
- * remainingFraction and earliest resetTime across all Gemini models in `discovered`.
+ * This helper calibrates an existing Gemini group's 5-hour window or synthesizes a new
+ * `Gemini Models` group when omitted, using the minimum remainingFraction and earliest
+ * resetTime across all Gemini models in `discovered`.
  */
 export function calibrateGeminiQuota(
   groups: QuotaGroup[],
@@ -179,21 +182,56 @@ export function calibrateGeminiQuota(
 
   if (minRemaining === null) return groups
 
-  return groups.map((group) => {
+  let matchedGemini = false
+  const updated = groups.map((group) => {
     const lower = group.name.toLowerCase()
-    if (!lower.includes('gemini') && !lower.includes('google')) return group
+    if (!lower.includes('gemini') && !lower.includes('google') && !group.windows.some((w) => w.bucketId.toLowerCase().includes('gemini'))) {
+      return group
+    }
+    matchedGemini = true
+    let found5h = false
+    const windows = group.windows.map((w) => {
+      if (w.window !== '5h' && !w.bucketId.toLowerCase().includes('5h')) return w
+      found5h = true
+      return {
+        ...w,
+        remainingFraction: minRemaining,
+        resetTime: earliestReset ?? w.resetTime,
+      }
+    })
+    if (!found5h) {
+      windows.push({
+        bucketId: 'gemini-5h',
+        window: '5h',
+        remainingFraction: minRemaining,
+        resetTime: earliestReset ?? null,
+      })
+      windows.sort((a, b) => windowRank(a.window) - windowRank(b.window) || a.window.localeCompare(b.window))
+    }
     return {
       ...group,
-      windows: group.windows.map((w) => {
-        if (w.window !== '5h' && !w.bucketId.toLowerCase().includes('5h')) return w
-        return {
-          ...w,
-          remainingFraction: minRemaining,
-          resetTime: earliestReset ?? w.resetTime,
-        }
-      }),
+      windows,
     }
   })
+
+  if (!matchedGemini) {
+    const syntheticGemini: QuotaGroup = {
+      name: 'Gemini Models',
+      windows: [
+        {
+          bucketId: 'gemini-5h',
+          window: '5h',
+          remainingFraction: minRemaining,
+          resetTime: earliestReset ?? null,
+        },
+      ],
+    }
+    const merged = [syntheticGemini, ...updated]
+    merged.sort((a, b) => groupDisplayRank(a.name) - groupDisplayRank(b.name) || a.name.localeCompare(b.name))
+    return merged
+  }
+
+  return updated
 }
 
 /**
@@ -284,9 +322,9 @@ export async function fetchQuotaSummary(
     }
   }
 
-  // When Gemini quota was missing on the primary endpoint and recovered from a fallback,
-  // calibrate its 5-hour window using active model quota from fetchAvailableModels.
-  if (!primaryHadGemini && hasGeminiQuotaGroup(accumulated)) {
+  // When Gemini quota was missing on the primary endpoint (or omitted across all endpoints),
+  // calibrate its 5-hour window or synthesize Gemini Models using active model quota from fetchAvailableModels.
+  if (!primaryHadGemini) {
     try {
       const { fetchAvailableModels } = await import('./models.ts')
       const discovered = await fetchAvailableModels(accessToken, projectId, fetchImpl)
