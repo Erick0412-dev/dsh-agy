@@ -565,7 +565,21 @@ export class AgySessionManager {
           const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
           return routed(input, { ...init, signal })
         }
-        return await fetchQuotaSummary(auth.access, account.projectId, bounded)
+        const fallbackWeekly = account.cachedQuota?.google?.weeklyFraction !== undefined
+          ? {
+              remainingFraction: account.cachedQuota.google.weeklyFraction,
+              resetTime: account.cachedQuota.google.weeklyResetTime ?? null,
+            }
+          : (() => {
+              const gemini = account.cachedLimits?.groups?.find((g) =>
+                g.name.toLowerCase().includes('gemini') || g.name.toLowerCase().includes('google'),
+              )
+              const w = gemini?.windows.find((win) => win.window === 'weekly' || win.bucketId.toLowerCase().includes('weekly'))
+              return w && typeof w.remainingFraction === 'number'
+                ? { remainingFraction: w.remainingFraction, resetTime: w.resetTime ?? null }
+                : null
+            })()
+        return await fetchQuotaSummary(auth.access, account.projectId, bounded, undefined, fallbackWeekly)
       } catch {
         // Best-effort: an empty result is the caller's "unknown", never a throw.
         return []

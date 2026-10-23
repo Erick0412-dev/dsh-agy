@@ -157,6 +157,7 @@ function groupDisplayRank(name: string): number {
 export function calibrateGeminiQuota(
   groups: QuotaGroup[],
   discovered: { models?: Record<string, { quotaInfo?: { remainingFraction?: unknown; resetTime?: unknown } }> } | null | undefined,
+  fallbackWeekly?: { remainingFraction?: number | null; resetTime?: string | null } | null,
 ): QuotaGroup[] {
   if (!discovered?.models) return groups
 
@@ -182,6 +183,21 @@ export function calibrateGeminiQuota(
 
   if (minRemaining === null) return groups
 
+  // Resolve effective weekly quota window for Gemini:
+  // 1. Explicit fallbackWeekly (from previous cache / carry-forward)
+  // 2. Or borrow resetTime from any existing weekly bucket in other groups (e.g. 3p-weekly has tier resetTime), defaulting fraction to 1 (100%)
+  const otherWeekly = groups
+    .flatMap((g) => g.windows)
+    .find((w) => w.window === 'weekly' || w.bucketId.toLowerCase().includes('weekly'))
+
+  const effectiveWeeklyFraction =
+    typeof fallbackWeekly?.remainingFraction === 'number' && Number.isFinite(fallbackWeekly.remainingFraction)
+      ? Math.max(0, Math.min(1, fallbackWeekly.remainingFraction))
+      : 1
+
+  const effectiveWeeklyResetTime =
+    fallbackWeekly?.resetTime || otherWeekly?.resetTime || null
+
   let matchedGemini = false
   const updated = groups.map((group) => {
     const lower = group.name.toLowerCase()
@@ -206,8 +222,18 @@ export function calibrateGeminiQuota(
         remainingFraction: minRemaining,
         resetTime: earliestReset ?? null,
       })
-      windows.sort((a, b) => windowRank(a.window) - windowRank(b.window) || a.window.localeCompare(b.window))
     }
+    // If the Gemini group has no weekly window, synthesize/preserve it
+    const hasWeekly = windows.some((w) => w.window === 'weekly' || w.bucketId.toLowerCase().includes('weekly'))
+    if (!hasWeekly && (effectiveWeeklyResetTime || fallbackWeekly)) {
+      windows.push({
+        bucketId: 'gemini-weekly',
+        window: 'weekly',
+        remainingFraction: effectiveWeeklyFraction,
+        resetTime: effectiveWeeklyResetTime,
+      })
+    }
+    windows.sort((a, b) => windowRank(a.window) - windowRank(b.window) || a.window.localeCompare(b.window))
     return {
       ...group,
       windows,
@@ -215,16 +241,26 @@ export function calibrateGeminiQuota(
   })
 
   if (!matchedGemini) {
+    const syntheticWindows: QuotaWindow[] = [
+      {
+        bucketId: 'gemini-5h',
+        window: '5h',
+        remainingFraction: minRemaining,
+        resetTime: earliestReset ?? null,
+      },
+    ]
+    if (effectiveWeeklyResetTime || fallbackWeekly) {
+      syntheticWindows.push({
+        bucketId: 'gemini-weekly',
+        window: 'weekly',
+        remainingFraction: effectiveWeeklyFraction,
+        resetTime: effectiveWeeklyResetTime,
+      })
+    }
+    syntheticWindows.sort((a, b) => windowRank(a.window) - windowRank(b.window) || a.window.localeCompare(b.window))
     const syntheticGemini: QuotaGroup = {
       name: 'Gemini Models',
-      windows: [
-        {
-          bucketId: 'gemini-5h',
-          window: '5h',
-          remainingFraction: minRemaining,
-          resetTime: earliestReset ?? null,
-        },
-      ],
+      windows: syntheticWindows,
     }
     const merged = [syntheticGemini, ...updated]
     merged.sort((a, b) => groupDisplayRank(a.name) - groupDisplayRank(b.name) || a.name.localeCompare(b.name))
@@ -283,6 +319,8 @@ export async function fetchQuotaSummary(
   accessToken: string,
   projectId: string | undefined,
   fetchImpl: typeof fetch = proxiedFetch,
+  discoveredModels?: { models?: Record<string, { quotaInfo?: { remainingFraction?: unknown; resetTime?: unknown } }> } | null,
+  fallbackWeekly?: { remainingFraction?: number | null; resetTime?: string | null } | null,
 ): Promise<QuotaGroup[]> {
   const body = JSON.stringify(projectId ? { project: projectId } : {})
   let accumulated: QuotaGroup[] = []
@@ -326,9 +364,13 @@ export async function fetchQuotaSummary(
   // calibrate its 5-hour window or synthesize Gemini Models using active model quota from fetchAvailableModels.
   if (!primaryHadGemini) {
     try {
-      const { fetchAvailableModels } = await import('./models.ts')
-      const discovered = await fetchAvailableModels(accessToken, projectId, fetchImpl)
-      accumulated = calibrateGeminiQuota(accumulated, discovered)
+      const discovered = discoveredModels !== undefined
+        ? discoveredModels
+        : await (async () => {
+            const { fetchAvailableModels } = await import('./models.ts')
+            return await fetchAvailableModels(accessToken, projectId, fetchImpl)
+          })()
+      accumulated = calibrateGeminiQuota(accumulated, discovered, fallbackWeekly)
     } catch {
       // Graceful degradation: keep the recovered fallback groups as-is.
     }

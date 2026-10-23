@@ -1225,6 +1225,57 @@ describe('quota summary (5h / weekly windows)', () => {
     expect(result[1]!.name).toBe('Claude and GPT models')
   })
 
+  it('calibrateGeminiQuota synthesizes weekly window from 3p-weekly or fallbackWeekly', () => {
+    const claudeWithWeekly = parseQuotaSummary({
+      groups: [
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [
+            { bucketId: '3p-5h', window: '5h', remainingFraction: 1 },
+            { bucketId: '3p-weekly', window: 'weekly', remainingFraction: 0.44, resetTime: '2026-10-27T15:10:00Z' },
+          ],
+        },
+      ],
+    })
+    const discovered = {
+      models: {
+        'gemini-3.8-flash-tiered': {
+          quotaInfo: { remainingFraction: 0.83, resetTime: '2026-10-23T18:00:00Z' },
+        },
+      },
+    }
+
+    // 1. Borrowing weekly resetTime from 3p-weekly when fallbackWeekly is not supplied
+    const resultAutoWeekly = calibrateGeminiQuota(claudeWithWeekly, discovered)
+    expect(resultAutoWeekly[0]!.name).toBe('Gemini Models')
+    expect(resultAutoWeekly[0]!.windows).toEqual([
+      {
+        bucketId: 'gemini-5h',
+        window: '5h',
+        remainingFraction: 0.83,
+        resetTime: '2026-10-23T18:00:00Z',
+      },
+      {
+        bucketId: 'gemini-weekly',
+        window: 'weekly',
+        remainingFraction: 1,
+        resetTime: '2026-10-27T15:10:00Z',
+      },
+    ])
+
+    // 2. Explicit fallbackWeekly overrides fraction & resetTime
+    const resultFallbackWeekly = calibrateGeminiQuota(claudeWithWeekly, discovered, {
+      remainingFraction: 0.9,
+      resetTime: '2026-10-30T00:00:00Z',
+    })
+    expect(resultFallbackWeekly[0]!.windows[1]).toEqual({
+      bucketId: 'gemini-weekly',
+      window: 'weekly',
+      remainingFraction: 0.9,
+      resetTime: '2026-10-30T00:00:00Z',
+    })
+  })
+
   it('fetchQuotaSummary synthesizes Gemini Models when all endpoints omit it', async () => {
     const claudePayload = JSON.stringify({
       groups: [
