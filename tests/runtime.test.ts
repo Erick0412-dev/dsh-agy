@@ -429,12 +429,12 @@ describe('fingerprint', () => {
     // LINUX_AMD64 | LINUX_ARM64 | WINDOWS_AMD64`, so these Go-style tokens ARE the
     // official vocabulary for the enum — while the UA's own `darwin/arm64` token is
     // a separate, still-uncaptured thing (docs/official-identity.json).
-    expect(fp.userAgent).toMatch(/^antigravity\/\d+\.\d+\.\d+ darwin\/arm64$/)
+    expect(fp.userAgent).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ \(aidev_client; os_type=darwin; arch=arm64; cl=\d+\)$/)
     expect(fp.clientMetadata.ideType).toBe('ANTIGRAVITY')
     // The metadata is the official `ClientMetadata` message: only fields whose
     // vocabulary is captured, so `pluginVersion`/`ideName`/... stay absent rather
     // than guessed.
-    expect(fp.clientMetadata.ideVersion).toBe(fp.userAgent.replace(/^antigravity\//, '').replace(/ .*$/, ''))
+    expect(fp.clientMetadata.ideVersion).toBe(fp.userAgent.match(/antigravity\/hub\/([\d.]+)/)?.[1])
     expect([
       'PLATFORM_UNSPECIFIED', 'DARWIN_AMD64', 'DARWIN_ARM64',
       'LINUX_AMD64', 'LINUX_ARM64', 'WINDOWS_AMD64',
@@ -459,9 +459,9 @@ describe('fingerprint', () => {
     const fp = generateFingerprint()
     const before = fp.userAgent
     expect(updateFingerprintVersion(fp, '9.9.9')).toBe(true)
-    expect(fp.userAgent).toContain('antigravity/9.9.9')
+    expect(fp.userAgent).toContain('antigravity/hub/9.9.9')
     expect(updateFingerprintVersion(fp, '9.9.9')).toBe(false)
-    expect(fp.userAgent).toBe(before.replace(/antigravity\/[\d.]+/, 'antigravity/9.9.9'))
+    expect(fp.userAgent).toBe(before.replace(/antigravity\/hub\/[\d.]+/, 'antigravity/hub/9.9.9'))
   })
 
   it('bounds the fingerprint history to the most recent entries', () => {
