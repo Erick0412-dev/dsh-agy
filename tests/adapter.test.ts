@@ -543,6 +543,23 @@ describe('translate', () => {
     ])
   })
 
+  it('maps unified thinking models (gemini-4-argon, claude-opus-5-5) to matching wire models based on effort', () => {
+    const lowArgon = toAgyRequestBody(generateOptions({ model: 'gemini-4-argon', reasoningEffort: 'low' }), {})
+    expect(lowArgon.model).toBe('gemini-4-argon-low')
+
+    const highArgon = toAgyRequestBody(generateOptions({ model: 'gemini-4-argon', reasoningEffort: 'high' }), {})
+    expect(highArgon.model).toBe('gemini-4-argon-high')
+
+    const medArgon = toAgyRequestBody(generateOptions({ model: 'gemini-4-argon' }), {})
+    expect(medArgon.model).toBe('gemini-4-argon-medium')
+
+    const lowOpus = toAgyRequestBody(generateOptions({ model: 'claude-opus-5-5', reasoningEffort: 'low' }), {})
+    expect(lowOpus.model).toBe('claude-opus-5-5-low')
+
+    const highOpus = toAgyRequestBody(generateOptions({ model: 'claude-opus-5-5', reasoningEffort: 'high' }), {})
+    expect(highOpus.model).toBe('claude-opus-5-5-high')
+  })
+
   it('maps system, tools, and generation config', () => {
     const body = toAgyRequestBody(
       generateOptions({
@@ -1630,11 +1647,12 @@ describe('models', () => {
     expect(ids).not.toContain('gemini-3.8-flash-high')
     expect(ids).not.toContain('gemini-3.8-flash-medium')
     expect(ids).not.toContain('gemini-3.8-flash-low')
-    // 4 argon has no -tiered model, so all three tiers remain callable
-    expect(ids).toContain('gemini-4-argon-high')
-    expect(ids).toContain('gemini-4-argon-medium')
-    expect(ids).toContain('gemini-4-argon-low')
-    expect(merged.find((m) => m.id === 'gemini-4-argon-medium')?.context?.contextWindow).toBe(1048576)
+    // 4 argon unifies into gemini-4-argon with level thinking, hiding its split siblings
+    expect(ids).toContain('gemini-4-argon')
+    expect(ids).not.toContain('gemini-4-argon-high')
+    expect(ids).not.toContain('gemini-4-argon-medium')
+    expect(ids).not.toContain('gemini-4-argon-low')
+    expect(merged.find((m) => m.id === 'gemini-4-argon')?.context?.contextWindow).toBe(1048576)
   })
 
   it('hides ids upstream assigns to a non-chat role, including ids without a tab_ prefix', () => {
@@ -1872,6 +1890,16 @@ describe('models', () => {
     expect(dynamicTiered.context?.contextWindow).toBe(1048576)
     expect(dynamicTiered.defaultMaxTokens).toBe(65536)
     expect(dynamicTiered.inputModalities).toEqual(['text', 'image'])
+
+    const argon = resolveAgyModel('agy', 'gemini-4-argon')
+    expect(argon.name).toBe('Gemini 4 Argon')
+    expect(argon.reasoning).toBeDefined()
+    expect(argon.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
+
+    const opus55 = resolveAgyModel('agy', 'claude-opus-5-5')
+    expect(opus55.name).toBe('Claude Opus 5.5')
+    expect(opus55.reasoning).toBeDefined()
+    expect(opus55.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
 
     // legacy id-bound models and non-tiered discovered ids must not expose reasoning
     for (const id of ['gemini-3.6-flash-high', 'gemini-2.5-flash', 'brand-new-model']) {

@@ -23,6 +23,9 @@ export interface CatalogModel {
 }
 
 export const AGY_PUBLIC_MODELS: readonly CatalogModel[] = [
+  { id: 'gemini-4-argon', name: 'Gemini 4 Argon', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', contextLength: 200000, maxOutputTokens: 64000, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', contextLength: 200000, maxOutputTokens: 64000, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
   { id: 'gemini-3.8-flash-tiered', name: 'Gemini 3.8 Flash', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
   { id: 'gemini-3.7-flash-tiered', name: 'Gemini 3.7 Flash', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
   { id: 'gemini-3.6-flash-tiered', name: 'Gemini 3.6 Flash (Tiered)', contextLength: 1048576, maxOutputTokens: 65536, supportsReasoning: true, supportsVision: true, toolCalling: true, thinking: 'level' },
@@ -136,7 +139,11 @@ export function resetDiscoveredTieredModels(): void {
 export function isLevelThinkingModel(modelId: string): boolean {
   if (catalogModel(modelId)?.thinking === 'level') return true
   if (DISCOVERED_TIERED_FAMILIES.has(modelId)) return true
-  return typeof modelId === 'string' && modelId.endsWith('-tiered')
+  if (typeof modelId === 'string') {
+    if (modelId.endsWith('-tiered')) return true
+    if (modelId === 'gemini-4-argon' || modelId === 'claude-opus-5-5' || modelId === 'claude-sonnet-5-5') return true
+  }
+  return false
 }
 
 /**

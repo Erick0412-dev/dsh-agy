@@ -137,6 +137,10 @@ function advertisedModelIds(dynamic: DiscoveredModels): Set<string> {
   return advertised
 }
 
+export function isUnifiedThinkingFamily(modelId: string): boolean {
+  return modelId === 'gemini-4-argon' || modelId === 'claude-opus-5-5' || modelId === 'claude-sonnet-5-5'
+}
+
 /**
  * Discovered ids that should not appear in a chat model list, according to the
  * payload's own role assignments.
@@ -185,8 +189,17 @@ function hiddenDiscoveredIds(dynamic: DiscoveredModels): Set<string> {
     }
   }
   for (const id of Object.keys(models)) {
-    const m = /^(.*)-(?:low|medium|high)$/.exec(id)
-    if (m && Object.hasOwn(models, `${m[1]}-tiered`)) hidden.add(id)
+    const m = /^(.*)-(?:low|medium|high|max)$/.exec(id)
+    if (m && m[1]) {
+      const base = m[1]
+      if (
+        Object.hasOwn(models, `${base}-tiered`) ||
+        (Object.hasOwn(models, base) && isLevelThinkingModel(base)) ||
+        isUnifiedThinkingFamily(base)
+      ) {
+        hidden.add(id)
+      }
+    }
   }
   return hidden
 }
@@ -343,6 +356,23 @@ export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
       inputModalities: inputModalitiesFor(meta),
       ...(contextWindow !== undefined ? { context: { contextWindow } } : {}),
     })
+  }
+  // Ensure unified base models for split thinking families are present
+  for (const splitId of Object.keys(dynamic.models ?? {})) {
+    const m = /^(.*)-(?:low|medium|high|max)$/.exec(splitId)
+    if (m && m[1]) {
+      const base = m[1]
+      if (isLevelThinkingModel(base) && !entries.some((e) => e.id === base)) {
+        const meta = catalogModel(base)
+        entries.push({
+          provider: AGY_PROVIDER,
+          id: base,
+          name: meta?.name ?? formatTieredModelName(base),
+          inputModalities: inputModalitiesFor(meta),
+          ...(meta?.contextLength !== undefined ? { context: { contextWindow: meta.contextLength } } : {}),
+        })
+      }
+    }
   }
   entries.sort(compareModels)
   return entries
