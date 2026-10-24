@@ -1547,6 +1547,31 @@ describe('models', () => {
     expect(merged.find((m) => m.id === 'gemini-3.9-flash-tiered')?.context?.contextWindow).toBe(1048576)
   })
 
+  it('hides split low/medium/high models when the corresponding -tiered model is present', () => {
+    const merged = mergeModelCatalog({
+      models: {
+        'gemini-3.8-flash-tiered': { displayName: 'Gemini 3.8 Flash' },
+        'gemini-3.8-flash-high': { displayName: 'Gemini 3.8 Flash (High)' },
+        'gemini-3.8-flash-medium': { displayName: 'Gemini 3.8 Flash (Medium)' },
+        'gemini-3.8-flash-low': { displayName: 'Gemini 3.8 Flash (Low)' },
+        'gemini-4-argon-high': { displayName: 'Gemini 4 Argon (High)' },
+        'gemini-4-argon-medium': { displayName: 'Gemini 4 Argon (Medium)' },
+        'gemini-4-argon-low': { displayName: 'Gemini 4 Argon (Low)' },
+      },
+    })
+    const ids = merged.map((m) => m.id)
+    // 3.8 flash tiered hides its split siblings
+    expect(ids).toContain('gemini-3.8-flash-tiered')
+    expect(ids).not.toContain('gemini-3.8-flash-high')
+    expect(ids).not.toContain('gemini-3.8-flash-medium')
+    expect(ids).not.toContain('gemini-3.8-flash-low')
+    // 4 argon has no -tiered model, so all three tiers remain callable
+    expect(ids).toContain('gemini-4-argon-high')
+    expect(ids).toContain('gemini-4-argon-medium')
+    expect(ids).toContain('gemini-4-argon-low')
+    expect(merged.find((m) => m.id === 'gemini-4-argon-medium')?.context?.contextWindow).toBe(1048576)
+  })
+
   it('hides ids upstream assigns to a non-chat role, including ids without a tab_ prefix', () => {
     const merged = mergeModelCatalog({
       models: {

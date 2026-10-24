@@ -61,7 +61,7 @@ describe('AgySessionManager', () => {
     const session = await sessions.getSession()
     expect(session).toBeDefined()
     expect(session!.auth.access).toBe('at')
-    expect(session!.impersonation['User-Agent']).toMatch(/^antigravity\/\d+\.\d+\.\d+/)
+    expect(session!.impersonation['User-Agent']).toMatch(/^antigravity\/(?:hub\/)?\d+\.\d+\.\d+/)
     expect(session!.impersonation.clientMetadata.ideType).toContain('ANTIGRAVITY')
   })
 
@@ -739,7 +739,7 @@ describe('usage-driven selection', () => {
       const first = impersonationHeadersFor(account('a@x'))
       const second = impersonationHeadersFor(account('a@x'))
       expect(first).toEqual(second)
-      expect(first['User-Agent']).toMatch(/^antigravity\/\d+\.\d+\.\d+ \S+$/)
+      expect(first['User-Agent']).toMatch(/^antigravity\/(?:hub\/)?\d+\.\d+\.\d+/)
       expect(first.clientMetadata.ideType).toContain('ANTIGRAVITY')
       vi.unstubAllEnvs()
     }
@@ -1633,7 +1633,7 @@ describe('fingerprint version freshness', () => {
 
       const fp = (await store.load()).accounts[0]!.fingerprint!
       expect(fp.userAgent).not.toContain('1.22.2')
-      expect(fp.userAgent).toMatch(/^antigravity\/\d+\.\d+\.\d+ darwin\/arm64$/)
+      expect(fp.userAgent).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ \(aidev_client; os_type=darwin; arch=arm64; cl=\d+\)$/)
     } finally {
       _setFingerprintDataForTest(undefined)
       vi.unstubAllGlobals()
@@ -1674,4 +1674,25 @@ describe('fingerprint version freshness', () => {
       expect(probed[0]).toBe(await dispatcherForAsync(proxyUrl))
     })
   }, 5_000)
+
+  describe('account model capability routing', () => {
+    it('isModelSupportedByAccount filters models correctly based on cachedModels', async () => {
+      const { isModelSupportedByAccount } = await import('../src/session.ts')
+      const accWithModels: ManagedAccount = {
+        refresh: 'r',
+        addedAt: 1,
+        lastUsed: 1,
+        cachedModels: ['gemini-2.5-flash', 'claude-3-5-sonnet', 'gemini-3.8-flash-high'],
+      }
+      expect(isModelSupportedByAccount(accWithModels, 'gemini-2.5-flash')).toBe(true)
+      expect(isModelSupportedByAccount(accWithModels, 'claude-3-5-sonnet')).toBe(true)
+      expect(isModelSupportedByAccount(accWithModels, 'claude-3-7-sonnet')).toBe(false)
+      expect(isModelSupportedByAccount(accWithModels, 'gemini-4-argon-high')).toBe(false)
+      expect(isModelSupportedByAccount(accWithModels, 'gemini-3.8-flash-tiered')).toBe(true)
+
+      // unprobed account optimistic fallback
+      const unprobed: ManagedAccount = { refresh: 'r', addedAt: 1, lastUsed: 1 }
+      expect(isModelSupportedByAccount(unprobed, 'claude-3-7-sonnet')).toBe(true)
+    })
+  })
 })
