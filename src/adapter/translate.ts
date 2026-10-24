@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import type { GenerateOptions, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { generateAntigravityRequestId } from '../runtime/identity.ts'
 import { getThoughtSignature, THOUGHT_SIGNATURE_SENTINEL } from '../runtime/signature-cache.ts'
-import { catalogModel, isLevelThinkingModel } from './catalog.ts'
+import { catalogModel, isLevelThinkingModel, levelThinkingEffortsFor } from './catalog.ts'
 import { isClaudeModel, supportsMultimodalFiles, type AgyResolvedMultimodalFile } from './multimodal.ts'
 import {
   conversationMessages,
@@ -688,7 +688,7 @@ export function toAgyRequestBody(
       if (tiered !== undefined) {
         generationConfig.thinkingConfig = { thinkingBudget: tiered, includeThoughts: true }
       }
-    } else if (LEVEL_THINKING_LEVELS.has(effort)) {
+    } else if (LEVEL_THINKING_LEVELS.has(effort) && levelThinkingEffortsFor(options.model).includes(effort as any)) {
       // A configured number for this level takes the place of the level token:
       // both together would let the level win (see `thinkingBudgetFor`).
       const configured = context.thinkingBudgetFor?.(effort)

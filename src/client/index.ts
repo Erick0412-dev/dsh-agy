@@ -1318,7 +1318,8 @@ function ThinkingBudgetCard(props: { rpc: AgyRpcClient, t: T }): ReactNode {
             h('li', null, t('thinkingEffectLowUp')),
             h('li', null, t('thinkingEffectHighDown')),
             h('li', null, t('thinkingEffectMax')),
-            h('li', null, t('thinkingEffectReset'))),
+            h('li', null, t('thinkingEffectReset')),
+            h('li', null, t('thinkingEffectProLevels'))),
           // The selector's "Default" effort carries no level id, so it is its own
           // row rather than one of the three. Empty = upstream allocates; a value
           // = Max, a bare cap with no level sent alongside it.

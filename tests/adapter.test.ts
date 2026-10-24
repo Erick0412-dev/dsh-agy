@@ -11,7 +11,7 @@ import {
   resolveStreamIdleTimeoutMs,
 } from '../src/adapter/parse.ts'
 import { catalogModelList, fetchAvailableModels, listAgyModels, mergeModelCatalog, resolveAgyModel } from '../src/adapter/models.ts'
-import { AGY_PUBLIC_MODELS, formatTieredModelName, isChatCallableModelId } from '../src/adapter/catalog.ts'
+import { AGY_PUBLIC_MODELS, formatTieredModelName, isChatCallableModelId, registerDiscoveredTieredModels, resetDiscoveredTieredModels } from '../src/adapter/catalog.ts'
 import { AgyAdapter, buildRequestHeaders } from '../src/adapter/adapter.ts'
 import type { AgyAccountSession } from '../src/adapter/adapter.ts'
 import { getThoughtSignature } from '../src/runtime/signature-cache.ts'
@@ -1814,6 +1814,37 @@ describe('models', () => {
     }
   })
 
+  it('exposes pro family tiered reasoning with low/high efforts only (issue #47)', () => {
+    // gemini-3.1-pro-low is catalog-marked with thinking: 'level' and thinkingLevels: ['low', 'high']
+    const pro = resolveAgyModel('agy', 'gemini-3.1-pro-low')
+    expect(pro.reasoning).toBeDefined()
+    expect(pro.reasoning!.defaultEffort).toBeUndefined()
+    expect(pro.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'high'])
+
+    // Request mapping: low and high emit thinkingLevel; medium is omitted (unsupported for Pro)
+    const proLow = toAgyRequestBody(generateOptions({ model: 'gemini-3.1-pro-low', reasoningEffort: 'low' as any }), {})
+    expect(proLow.request.generationConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'low', includeThoughts: true } })
+
+    const proHigh = toAgyRequestBody(generateOptions({ model: 'gemini-3.1-pro-low', reasoningEffort: 'high' as any }), {})
+    expect(proHigh.request.generationConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } })
+
+    const proMedium = toAgyRequestBody(generateOptions({ model: 'gemini-3.1-pro-low', reasoningEffort: 'medium' as any }), {})
+    expect(proMedium.request.generationConfig?.thinkingConfig).toBeUndefined()
+
+    // Dynamically discovered tiered models via tieredModelIds
+    registerDiscoveredTieredModels({
+      pro: ['gemini-custom-pro-id'],
+      flash: ['gemini-custom-flash-id'],
+    })
+    const dynamicPro = resolveAgyModel('agy', 'gemini-custom-pro-id')
+    expect(dynamicPro.reasoning).toBeDefined()
+    expect(dynamicPro.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'high'])
+
+    const dynamicFlash = resolveAgyModel('agy', 'gemini-custom-flash-id')
+    expect(dynamicFlash.reasoning).toBeDefined()
+    expect(dynamicFlash.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
+  })
+
   it('declares no default reasoning effort, so the selector keeps an adaptive option', () => {
     // Regression guard. `defaultEffort` is not a cosmetic default: the harness
     // resolves `effective = requested ?? reasoning.defaultEffort` AND builds the
@@ -2064,6 +2095,7 @@ describe('AgyAdapter', () => {
     vi.unstubAllGlobals()
     delete process.env.DSH_AGY_IDLE_TIMEOUT_MS
     delete process.env.AGY_IDLE_TIMEOUT_MS
+    resetDiscoveredTieredModels()
   })
 
   function session(overrides: Partial<AgyAccountSession> = {}): AgyAccountSession {
