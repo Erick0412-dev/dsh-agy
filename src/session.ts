@@ -18,10 +18,12 @@ import {
   decideRotation,
   isCoolingDown,
   isFamilyRateLimited,
+  isModelSupportedByAccount,
   parseFutureResetMs,
   pickNextAccountIndex,
   recordRateLimit,
 } from './runtime/rotation.ts'
+export { isModelSupportedByAccount } from './runtime/rotation.ts'
 import {
   familyKeyOf,
   familyQuotaFor,
@@ -191,22 +193,7 @@ interface QuotaRefreshResult {
  * {@link getFingerprintData} so a `$DSH_HOME/agy/agy-fingerprint-data.json` override
  * still applies on this path.
  */
-/** Whether a specific account is known to support the requested model. */
-export function isModelSupportedByAccount(account: ManagedAccount, model?: string): boolean {
-  if (!model || !account.cachedModels || account.cachedModels.length === 0) return true
-  if (account.cachedModels.includes(model)) return true
-  const tieredMatch = /^(.*)-tiered$/.exec(model)
-  if (tieredMatch) {
-    const base = tieredMatch[1]
-    if (account.cachedModels.some((m) => m === model || m.startsWith(base + '-'))) return true
-  }
-  const levelMatch = /^(.*)-(?:low|medium|high)$/.exec(model)
-  if (levelMatch) {
-    const base = levelMatch[1]
-    if (account.cachedModels.some((m) => m === model || m === `${base}-tiered` || m.startsWith(base + '-'))) return true
-  }
-  return false
-}
+
 
 export function impersonationHeadersFor(account: ManagedAccount): AgyAccountSession['impersonation'] {
   const fingerprint = account.fingerprint
@@ -966,7 +953,7 @@ export class AgySessionManager {
           // cursor for a diagnostic probe would be a side effect the user did
           // not request. Surface the failure instead.
           if (accountIndex !== undefined) throw error
-          storage = await this.skipAccount(storage, picked.account)
+          storage = await this.skipAccount(storage, picked.account, model)
           continue
         }
         // Otherwise the same socket codes describe the connection, not a proxy
@@ -974,7 +961,7 @@ export class AgySessionManager {
         // failure in case none of them succeeds.
         lastTransportError = error
         if (accountIndex !== undefined) throw error
-        storage = await this.skipAccount(storage, picked.account)
+        storage = await this.skipAccount(storage, picked.account, model)
         continue
       }
       if (!auth) {
@@ -1067,12 +1054,12 @@ export class AgySessionManager {
    * failed, so the next `pickAccount` in this same request tries another one.
    * State on the account itself is deliberately left untouched (no cooldown).
    */
-  private async skipAccount(storage: AccountStorageV4, account: ManagedAccount): Promise<AccountStorageV4> {
+  private async skipAccount(storage: AccountStorageV4, account: ManagedAccount, model?: string): Promise<AccountStorageV4> {
     this.clearAffinityForAccount(this.accountKey(account))
     const key = this.accountKey(account)
     const deadIndex = storage.accounts.findIndex((candidate) => this.accountKey(candidate) === key)
     if (deadIndex !== -1) {
-      const next = pickNextAccountIndex(storage.accounts, deadIndex, Date.now())
+      const next = pickNextAccountIndex(storage.accounts, deadIndex, Date.now(), model)
       if (next !== storage.activeIndex) {
         storage.activeIndex = next
         await this.store.mutate((s) => { s.activeIndex = next }).catch(() => {})
@@ -1142,7 +1129,8 @@ export class AgySessionManager {
         this.tokenCache.delete(key)
         this.failureCounts.delete(key)
         const currentIndex = storage.accounts.findIndex((a) => this.accountKey(a) === key)
-        const nextIndex = pickNextAccountIndex(storage.accounts, currentIndex >= 0 ? currentIndex : storage.activeIndex, Date.now())
+        const targetModel = info?.model ?? familyKeyOf(info?.model)
+        const nextIndex = pickNextAccountIndex(storage.accounts, currentIndex >= 0 ? currentIndex : storage.activeIndex, Date.now(), targetModel)
         if (nextIndex !== storage.activeIndex) {
           storage.activeIndex = nextIndex
           nextIndexToRotate = nextIndex
@@ -1187,8 +1175,8 @@ export class AgySessionManager {
 
       if (decision.action === 'rotate' || decision.action === 'cool') {
         const currentIndex = storage.accounts.findIndex((a) => this.accountKey(a) === key)
-        const familyKey = familyKeyOf(info?.model)
-        const nextIndex = pickNextAccountIndex(storage.accounts, currentIndex >= 0 ? currentIndex : storage.activeIndex, Date.now(), familyKey)
+        const targetModel = info?.model ?? familyKeyOf(info?.model)
+        const nextIndex = pickNextAccountIndex(storage.accounts, currentIndex >= 0 ? currentIndex : storage.activeIndex, Date.now(), targetModel)
         if (nextIndex !== storage.activeIndex) {
           storage.activeIndex = nextIndex
           nextIndexToRotate = nextIndex
