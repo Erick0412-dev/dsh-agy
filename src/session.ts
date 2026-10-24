@@ -323,6 +323,25 @@ export class AgySessionManager {
     return busy
   }
 
+  /** Collect all unique non-disabled model IDs cached across all enabled accounts in the pool. */
+  async getPoolModelIds(): Promise<readonly string[]> {
+    try {
+      const storage = await this.store.load()
+      const set = new Set<string>()
+      for (const acc of storage.accounts) {
+        if (acc.enabled === false) continue
+        for (const m of acc.cachedModels ?? []) {
+          if (!m.endsWith('-disabled')) {
+            set.add(m)
+          }
+        }
+      }
+      return Array.from(set)
+    } catch {
+      return []
+    }
+  }
+
   /** Last fraction snapshot per account, for `sampleLimitBurn` (memory only). */
   private readonly limitFractions = new Map<string, LimitSample>()
   /** Latest burn rate per account: bucketId -> fraction/hour (memory only). */
