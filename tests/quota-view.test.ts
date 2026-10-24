@@ -14,6 +14,8 @@ import {
   desensitizeEmail,
   dotStateFor,
   drainThresholdFor,
+  formatDetailedReset,
+  formatQuotaReset,
   pickBadgeQuota,
   pickBadgeWindow,
   PROBE_FAILURE_BACKOFF_MS,
@@ -302,6 +304,15 @@ describe('quota cards', () => {
     expect(buildQuotaCards(account(), t, NOW)).toEqual([])
     expect(buildQuotaCards(undefined, t, NOW)).toEqual([])
   })
+
+  it('renders detailed reset countdowns when detailed option is enabled', () => {
+    const rows = windowRows([
+      window('h', '5h', 0.8, at(195)),
+      window('w', 'weekly', 0.5, at(5 * 24 * 60 + 12 * 60)),
+    ], t, NOW, true)
+    expect(rows[0]?.reset).toBe(zh.badgeReset5hHoursMins.replace('{hours}', '3').replace('{mins}', '15'))
+    expect(rows[1]?.reset).toContain(zh.badgeCountdownDaysHours.replace('{days}', '5').replace('{hours}', '12'))
+  })
 })
 
 describe('account identity', () => {
@@ -367,6 +378,49 @@ describe('relative time', () => {
     expect(resetText(at(120), t, NOW)).toBe(zh.quotaResetIn.replace('{value}', zh.relHours.replace('{n}', '2')))
     expect(resetText(null, t, NOW)).toBeNull()
     expect(resetText('not-a-date', t, NOW)).toBeNull()
+  })
+
+  it('formats detailed countdowns for 5h and longer windows', () => {
+    // 5h window: hours and minutes
+    expect(formatDetailedReset('5h', at(195), t, NOW)).toBe(
+      zh.badgeReset5hHoursMins.replace('{hours}', '3').replace('{mins}', '15'),
+    )
+    // 5h window: minutes only (< 1 hour)
+    expect(formatDetailedReset('5h', at(45), t, NOW)).toBe(
+      zh.badgeReset5hMins.replace('{mins}', '45'),
+    )
+
+    // Weekly window: days and hours
+    const daysAndHours = formatDetailedReset('weekly', at(5 * 24 * 60 + 12 * 60), t, NOW)
+    expect(daysAndHours).toContain(zh.badgeCountdownDaysHours.replace('{days}', '5').replace('{hours}', '12'))
+
+    // Weekly window: days only
+    const daysOnly = formatDetailedReset('weekly', at(3 * 24 * 60), t, NOW)
+    expect(daysOnly).toContain(zh.badgeCountdownDays.replace('{days}', '3'))
+
+    // Weekly window: hours only (< 1 day)
+    const hoursOnly = formatDetailedReset('weekly', at(14 * 60), t, NOW)
+    expect(hoursOnly).toContain(zh.badgeCountdownHours.replace('{hours}', '14'))
+
+    // Weekly window: minutes only (< 1 hour)
+    const minsOnly = formatDetailedReset('weekly', at(45), t, NOW)
+    expect(minsOnly).toContain(zh.badgeCountdownMins.replace('{mins}', '45'))
+
+    // Passed reset
+    expect(formatDetailedReset('5h', at(-5), t, NOW)).toBe(zh.quotaResetPassed)
+    expect(formatDetailedReset('weekly', at(-10), t, NOW)).toBe(zh.quotaResetPassed)
+
+    // Null or invalid reset
+    expect(formatDetailedReset('5h', null, t, NOW)).toBeNull()
+    expect(formatDetailedReset('weekly', 'invalid', t, NOW)).toBeNull()
+  })
+
+  it('selects standard vs detailed reset format based on the detailed flag', () => {
+    const standard = formatQuotaReset('5h', at(195), t, NOW, false)
+    expect(standard).toBe(resetText(at(195), t, NOW))
+
+    const detailed = formatQuotaReset('5h', at(195), t, NOW, true)
+    expect(detailed).toBe(formatDetailedReset('5h', at(195), t, NOW))
   })
 
   it('counts a past moment ago with a direction suffix', () => {

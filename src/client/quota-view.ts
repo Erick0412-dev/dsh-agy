@@ -173,6 +173,80 @@ export function resetText(resetTime: string | null, t: QuotaTranslate, now: numb
   return untilText(resetTime, t, now)
 }
 
+/**
+ * Detailed reset countdown for a quota window:
+ * - 5h window: e.g. "resets in 3h 15m" / "resets in 45m"
+ * - daily/weekly window: full date + countdown: "MM/DD HH:mm (5d 12h later)" / "(5d later)" / "(45m later)"
+ */
+export function formatDetailedReset(
+  window: string,
+  resetTime: string | null | undefined,
+  t: QuotaTranslate,
+  now: number = Date.now(),
+): string | null {
+  if (!resetTime) return null
+  const at = Date.parse(resetTime)
+  if (Number.isNaN(at)) return null
+  if (at <= now) return t('quotaResetPassed')
+
+  const resetDate = new Date(at)
+  const diffMs = at - now
+
+  const diffMins = Math.floor(diffMs / MINUTE_MS)
+  const diffHours = Math.floor(diffMins / 60)
+  const diffDays = Math.floor(diffHours / 24)
+
+  if (window === '5h') {
+    if (diffHours > 0) {
+      const mins = diffMins % 60
+      return t('badgeReset5hHoursMins', { hours: diffHours, mins })
+    }
+    return t('badgeReset5hMins', { mins: Math.max(1, diffMins) })
+  }
+
+  let countdown = ''
+  if (diffDays > 0) {
+    const hours = diffHours % 24
+    countdown = hours > 0
+      ? t('badgeCountdownDaysHours', { days: diffDays, hours })
+      : t('badgeCountdownDays', { days: diffDays })
+  } else if (diffHours > 0) {
+    countdown = t('badgeCountdownHours', { hours: diffHours })
+  } else {
+    countdown = t('badgeCountdownMins', { mins: Math.max(1, diffMins) })
+  }
+
+  const month = resetDate.getMonth() + 1
+  const day = resetDate.getDate()
+  const hours = resetDate.getHours().toString().padStart(2, '0')
+  const minutes = resetDate.getMinutes().toString().padStart(2, '0')
+  const time = `${hours}:${minutes}`
+
+  return t('badgeResetFullDate', {
+    month,
+    day,
+    time,
+    countdown,
+  })
+}
+
+/**
+ * Format a window's reset moment with optional detailed countdown precision.
+ */
+export function formatQuotaReset(
+  window: string,
+  resetTime: string | null | undefined,
+  t: QuotaTranslate,
+  now: number = Date.now(),
+  detailed: boolean = false,
+): string | null {
+  if (!resetTime) return null
+  if (detailed) {
+    return formatDetailedReset(window, resetTime, t, now)
+  }
+  return resetText(resetTime, t, now)
+}
+
 // ─── window arithmetic ───────────────────────────────────────────────────────
 
 /** Sort rank for a window token; an unknown token ranks last. */
@@ -341,6 +415,7 @@ export function windowRows(
   windows: readonly QuotaWindow[],
   t: QuotaTranslate,
   now: number,
+  detailed: boolean = false,
 ): QuotaWindowRow[] {
   return sortWindows(windows).map((window) => {
     const stale = windowIsStale(window, now)
@@ -350,7 +425,7 @@ export function windowRows(
       bucketId: window.bucketId,
       label: windowLabel(window.window, t),
       percent: stale ? null : toPercent(window.remainingFraction),
-      reset: resetText(window.resetTime, t, now),
+      reset: formatQuotaReset(window.window, window.resetTime, t, now, detailed),
       stale,
     }
   })
@@ -367,12 +442,17 @@ export function windowRows(
  * A group whose windows all turned out to be unusable would render as an empty
  * card that pushes a real one off screen, so those are dropped.
  */
-export function buildQuotaCards(account: AccountView | undefined, t: QuotaTranslate, now: number): QuotaCard[] {
+export function buildQuotaCards(
+  account: AccountView | undefined,
+  t: QuotaTranslate,
+  now: number,
+  detailed: boolean = false,
+): QuotaCard[] {
   const groups = account?.limits
   if (!groups || groups.length === 0) return []
   const cards: QuotaCard[] = []
   for (const group of groups) {
-    const rows = windowRows(group.windows, t, now)
+    const rows = windowRows(group.windows, t, now, detailed)
     if (rows.length === 0) continue
     cards.push({
       key: group.name || `group-${cards.length}`,

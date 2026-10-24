@@ -881,19 +881,24 @@ describe('agy management RPC', () => {
   describe('ui preferences', () => {
     it('reads default preferences and updates them', async () => {
       const { management } = makeHarness()
-      const initial = await management.call('ui.prefs.get', {}) as { conversationBadge: boolean }
+      const initial = await management.call('ui.prefs.get', {}) as { conversationBadge: boolean; detailedQuotaReset: boolean }
       expect(initial.conversationBadge).toBe(false)
+      expect(initial.detailedQuotaReset).toBe(false)
 
-      const updated = await management.call('ui.prefs.set', { conversationBadge: true }) as { conversationBadge: boolean }
+      const updated = await management.call('ui.prefs.set', { conversationBadge: true, detailedQuotaReset: true }) as { conversationBadge: boolean; detailedQuotaReset: boolean }
       expect(updated.conversationBadge).toBe(true)
+      expect(updated.detailedQuotaReset).toBe(true)
 
-      const readBack = await management.call('ui.prefs.get', {}) as { conversationBadge: boolean }
+      const readBack = await management.call('ui.prefs.get', {}) as { conversationBadge: boolean; detailedQuotaReset: boolean }
       expect(readBack.conversationBadge).toBe(true)
+      expect(readBack.detailedQuotaReset).toBe(true)
     })
 
     it('rejects invalid preference values', async () => {
       const { management } = makeHarness()
       await expect(management.call('ui.prefs.set', { conversationBadge: 'invalid' as never }))
+        .rejects.toThrow(/must be a boolean/)
+      await expect(management.call('ui.prefs.set', { detailedQuotaReset: 123 as never }))
         .rejects.toThrow(/must be a boolean/)
     })
   })

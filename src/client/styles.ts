@@ -438,7 +438,11 @@ export const AGY_STYLES_CSS = `
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 4px 0;
+  padding: 6px 0;
+}
+.agy-pref-row + .agy-pref-row {
+  border-top: 0.5px solid ${aliasVar('border-l1')};
+  padding-top: 10px;
 }
 .agy-pref-name {
   font: var(--dsw-font-xs-strong-13);

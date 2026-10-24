@@ -32,7 +32,7 @@ import {
   windowLabel,
   type QuotaTranslate,
 } from './quota-view.ts'
-import type { AccountView, AgyRpcClient } from '../rpc-contract.ts'
+import type { AccountView, AgyRpcClient, UiPrefsView } from '../rpc-contract.ts'
 import type { QuotaWindow } from '../types.ts'
 
 /**
@@ -144,6 +144,7 @@ export function AgyQuotaBadge({ rpc, t }: { rpc: AgyRpcClient, t: QuotaTranslate
   const [isPinned, setIsPinned] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [detailedReset, setDetailedReset] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const rootRef = useRef<HTMLSpanElement | null>(null)
@@ -159,7 +160,17 @@ export function AgyQuotaBadge({ rpc, t }: { rpc: AgyRpcClient, t: QuotaTranslate
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
+    const onPrefsChange = (e: Event): void => {
+      const detail = (e as CustomEvent<UiPrefsView>).detail
+      if (detail && typeof detail.detailedQuotaReset === 'boolean') {
+        setDetailedReset(detail.detailedQuotaReset)
+      }
+    }
+    window.addEventListener('agy:ui-prefs-changed', onPrefsChange)
+    return () => {
+      window.removeEventListener('resize', checkMobile)
+      window.removeEventListener('agy:ui-prefs-changed', onPrefsChange)
+    }
   }, [])
 
   const load = useCallback(async (isManual: boolean = false) => {
@@ -172,8 +183,14 @@ export function AgyQuotaBadge({ rpc, t }: { rpc: AgyRpcClient, t: QuotaTranslate
     setIsUpdating(true)
     setLoading(true)
     try {
-      const listed = await rpc.call('account.list', {})
+      const [listed, prefs] = await Promise.all([
+        rpc.call('account.list', {}),
+        rpc.call('ui.prefs.get', {}).catch(() => null),
+      ])
       setAccounts(listed.accounts)
+      if (prefs) {
+        setDetailedReset(prefs.detailedQuotaReset === true)
+      }
       setError(null)
 
       const probe = shouldProbeLimits({ force: isManual, failedAt: failedAtRef.current, now: Date.now() })
@@ -292,7 +309,7 @@ export function AgyQuotaBadge({ rpc, t }: { rpc: AgyRpcClient, t: QuotaTranslate
         : t('badgeQuotaFormat', { percent: badgeQuota.percent }))
     : t('badgeCountFormat', { count: accountCount })
 
-  const rawCards = buildQuotaCards(activeAccount, t, now)
+  const rawCards = buildQuotaCards(activeAccount, t, now, detailedReset)
   const cards: EnrichedCard[] = rawCards.map((rc) => ({
     key: rc.key,
     title: rc.title,
