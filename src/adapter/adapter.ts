@@ -697,6 +697,7 @@ export class AgyAdapter extends LlmAdapter {
       try {
         for await (const chunk of parseAgySse(response.body, {
           signal: options.signal,
+          disambiguateToolCallIds: true,
           onToolSignature: (toolCallId, signature) => {
             pendingSignatures.push([toolCallId, signature])
           },

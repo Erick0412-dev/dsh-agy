@@ -1213,6 +1213,18 @@ describe('parseAgySse', () => {
     expect(end).toMatchObject({ block: { type: 'tool-call', id: 'fc-1' } })
   })
 
+  it('salts short pseudo-random upstream tool call ids when disambiguation is enabled', async () => {
+    const captured: Array<[string, string]> = []
+    const chunks = await collect(parseAgySse(sseStream([
+      'data: [{"candidates":[{"content":{"parts":[{"thoughtSignature":"sig-short","functionCall":{"id":"call_75146","name":"bash","args":{"cmd":"ls"}}}]}}]}]',
+      'data: [DONE]',
+    ]), { disambiguateToolCallIds: true, onToolSignature: (id, sig) => captured.push([id, sig]) }))
+    const end = chunks.find((c) => (c as { type: string }).type === 'block-end')
+    const toolCallBlock = (end as { block: { type: string; id: string } }).block
+    expect(toolCallBlock.id).toMatch(/^call_75146_[0-9a-z]+$/)
+    expect(captured).toEqual([[toolCallBlock.id, 'sig-short']])
+  })
+
   it('replays a cached signature on the next turn instead of the sentinel', async () => {
     const { setThoughtSignature } = await import('../src/runtime/signature-cache.ts')
     const { toAgyRequestBody } = await import('../src/adapter/translate.ts')
