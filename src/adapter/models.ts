@@ -253,6 +253,64 @@ export function isUpstreamDisplayNameContradictory(id: string, upstreamName: str
   return false
 }
 
+/**
+ * Model categorization and sorting rank according to family hierarchy:
+ * 1. Pro family (gemini-*-pro*)
+ * 2. Gemini 4 family (gemini-4-*)
+ * 3. Gemini 3 / 3.8 Flash family (gemini-3.8-flash*, gemini-3-flash*, gemini-3.5-flash without lite)
+ * 4. Flash Lite family (gemini-*-flash-lite*, gemini-2.5-flash*, etc.)
+ * 5. Claude family (claude-*)
+ * 6. GPT family (gpt-*)
+ * 7. Other models
+ */
+export function getModelCategoryRank(id: string): number {
+  const lower = id.toLowerCase()
+  if (lower.includes('pro')) return 1
+  if (lower.startsWith('gemini-4') || lower.includes('gemini-4') || lower.includes('argon')) return 2
+  if (lower.includes('flash') && !lower.includes('lite') && (lower.includes('3.8') || lower.includes('3-flash') || lower.includes('3.7') || lower.includes('3.6') || lower.includes('3.5'))) {
+    return 3
+  }
+  if (lower.includes('lite') || (lower.includes('flash') && lower.includes('2.5'))) return 4
+  if (lower.startsWith('claude')) return 5
+  if (lower.startsWith('gpt')) return 6
+  return 7
+}
+
+function extractModelVersion(id: string): number {
+  const match = /(?:gemini|claude|gpt)[-_](\d+(?:\.\d+)?)/i.exec(id)
+  return match && match[1] ? parseFloat(match[1]) : 0
+}
+
+/**
+ * Deterministic model comparator that sorts models into user-defined families
+ * (Pro -> Gemini 4 -> Flash 3.x -> Flash Lite / 2.5 -> Claude -> GPT -> Others),
+ * and newer versions / higher capability tiers first within each family.
+ */
+export function compareModels(a: { id: string }, b: { id: string }): number {
+  const rankA = getModelCategoryRank(a.id)
+  const rankB = getModelCategoryRank(b.id)
+  if (rankA !== rankB) return rankA - rankB
+
+  // Within Claude: Opus before Sonnet
+  if (rankA === 5) {
+    const verA = extractModelVersion(a.id)
+    const verB = extractModelVersion(b.id)
+    if (verA !== verB) return verB - verA
+
+    const isOpusA = a.id.includes('opus')
+    const isOpusB = b.id.includes('opus')
+    if (isOpusA !== isOpusB) return isOpusA ? -1 : 1
+  }
+
+  // Within same category, newer version first
+  const verA = extractModelVersion(a.id)
+  const verB = extractModelVersion(b.id)
+  if (verA !== verB) return verB - verA
+
+  // Tie-breaker: alphabetical by id
+  return a.id.localeCompare(b.id)
+}
+
 /** Merge dynamic ids with catalog metadata; non-chat and superseded ids are dropped, unknown ids keep minimal info. */
 export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
   if (dynamic.tieredModelIds) {
@@ -286,18 +344,21 @@ export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
       ...(contextWindow !== undefined ? { context: { contextWindow } } : {}),
     })
   }
+  entries.sort(compareModels)
   return entries
 }
 
 /** Catalog-only model list used when the endpoint is unreachable. */
 export function catalogModelList(): LlmModelInfo[] {
-  return AGY_PUBLIC_MODELS.map((model) => ({
+  const list = AGY_PUBLIC_MODELS.map((model) => ({
     provider: AGY_PROVIDER,
     id: model.id,
     name: model.name,
     inputModalities: inputModalitiesFor(model),
     context: { contextWindow: model.contextLength },
   }))
+  list.sort(compareModels)
+  return list
 }
 
 /** Adapter-facing listing: dynamic first, catalog fallback. */

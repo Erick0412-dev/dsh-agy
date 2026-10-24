@@ -80,7 +80,7 @@ export function formatTieredModelName(modelId: string): string {
  * the catalog-only fallback and the role-based hiding in agreement.
  */
 export function isChatCallableModelId(modelId: string): boolean {
-  return !modelId.startsWith('tab_') && !/^chat_\d+$/.test(modelId)
+  return !modelId.startsWith('tab_') && !/^chat_\d+$/.test(modelId) && !modelId.endsWith('-disabled')
 }
 
 export function catalogModel(modelId: string): CatalogModel | undefined {

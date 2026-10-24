@@ -1553,6 +1553,44 @@ describe('models', () => {
     expect(merged.find((m) => m.id === 'gemini-3.5-flash-lite')?.name).toBe('Gemini 3.5 Flash Lite')
   })
 
+  it('sorts models deterministically into family hierarchy (Pro -> Gemini 4 -> Flash 3.x -> Flash Lite/2.5 -> Claude -> GPT)', () => {
+    const merged = mergeModelCatalog({
+      models: {
+        'gpt-oss-120b-medium': {},
+        'gemini-4-argon': {},
+        'claude-sonnet-4-6': {},
+        'gemini-2.5-pro': {},
+        'gemini-3.5-flash-lite': {},
+        'gemini-3.8-flash-tiered': {},
+        'claude-opus-4-6-thinking': {},
+        'gemini-2.5-flash-lite': {},
+      },
+    })
+    const ids = merged.map((m) => m.id)
+    expect(ids).toEqual([
+      'gemini-2.5-pro',
+      'gemini-4-argon',
+      'gemini-3.8-flash-tiered',
+      'gemini-3.5-flash-lite',
+      'gemini-2.5-flash-lite',
+      'claude-opus-4-6-thinking',
+      'claude-sonnet-4-6',
+      'gpt-oss-120b-medium',
+    ])
+  })
+
+  it('filters out disabled models (e.g. gemini-4-argon-disabled)', () => {
+    expect(isChatCallableModelId('gemini-4-argon-disabled')).toBe(false)
+    expect(isChatCallableModelId('gemini-4-argon')).toBe(true)
+    const merged = mergeModelCatalog({
+      models: {
+        'gemini-4-argon-disabled': {},
+        'gemini-3.8-flash-tiered': {},
+      },
+    })
+    expect(merged.map((m) => m.id)).toEqual(['gemini-3.8-flash-tiered'])
+  })
+
   it('merges dynamic ids with catalog metadata and filters tab models', () => {
     const merged = mergeModelCatalog({
       models: {
