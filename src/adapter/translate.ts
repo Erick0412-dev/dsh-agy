@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import type { GenerateOptions, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { generateAntigravityRequestId } from '../runtime/identity.ts'
 import { getThoughtSignature, THOUGHT_SIGNATURE_SENTINEL } from '../runtime/signature-cache.ts'
-import { catalogModel, isLevelThinkingModel, levelThinkingEffortsFor } from './catalog.ts'
+import { catalogModel, isLevelThinkingModel, isUnifiedThinkingFamily, levelThinkingEffortsFor } from './catalog.ts'
 import { isClaudeModel, supportsMultimodalFiles, type AgyResolvedMultimodalFile } from './multimodal.ts'
 import {
   conversationMessages,
@@ -593,7 +593,7 @@ function toolsToDeclarations(tools: ToolSchema[] | undefined): AgyRequestBody['r
  * with level thinking, and mapped to the matching discrete wire model on request.
  */
 export function resolveWireModel(model: string, effort?: string): string {
-  if (model === 'gemini-4-argon' || model === 'claude-opus-5-5' || model === 'claude-sonnet-5-5') {
+  if (isUnifiedThinkingFamily(model)) {
     const target = effort === 'low' ? 'low' : effort === 'high' ? 'high' : 'medium'
     return `${model}-${target}`
   }

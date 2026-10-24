@@ -13,9 +13,12 @@ import {
   formatTieredModelName,
   isChatCallableModelId,
   isLevelThinkingModel,
+  isUnifiedThinkingFamily,
   levelThinkingEffortsFor,
   registerDiscoveredTieredModels,
+  registerDiscoveredUnifiedThinkingFamily,
 } from './catalog.ts'
+export { isUnifiedThinkingFamily } from './catalog.ts'
 
 export const AGY_PROVIDER = 'agy'
 
@@ -137,9 +140,7 @@ function advertisedModelIds(dynamic: DiscoveredModels): Set<string> {
   return advertised
 }
 
-export function isUnifiedThinkingFamily(modelId: string): boolean {
-  return modelId === 'gemini-4-argon' || modelId === 'claude-opus-5-5' || modelId === 'claude-sonnet-5-5'
-}
+
 
 /**
  * Discovered ids that should not appear in a chat model list, according to the
@@ -186,6 +187,18 @@ function hiddenDiscoveredIds(dynamic: DiscoveredModels): Set<string> {
       if (!Object.hasOwn(models, replacement)) continue
       if (!isChatCallableModelId(replacement) || roleHidden.has(replacement)) continue
       hidden.add(retiredId)
+    }
+  }
+  const splitCounts = new Map<string, number>()
+  for (const id of Object.keys(models)) {
+    const m = /^(.*)-(?:low|medium|high|max)$/.exec(id)
+    if (m && m[1]) {
+      splitCounts.set(m[1], (splitCounts.get(m[1]) ?? 0) + 1)
+    }
+  }
+  for (const [base, count] of splitCounts.entries()) {
+    if (count >= 2 || isUnifiedThinkingFamily(base)) {
+      registerDiscoveredUnifiedThinkingFamily(base)
     }
   }
   for (const id of Object.keys(models)) {
@@ -246,15 +259,23 @@ export function chatCallableDiscoveredIds(dynamic: DiscoveredModels): string[] {
   return Object.keys(dynamic.models ?? {}).filter((id) => isChatCallableModelId(id) && !hidden.has(id))
 }
 
+export function extractModelVersion(id: string): number {
+  const match = /(\d+)(?:[-_.](\d+))?/.exec(id)
+  if (!match || !match[1]) return 0
+  const major = parseInt(match[1], 10)
+  const minor = match[2] ? parseInt(match[2], 10) : 0
+  return major + minor / Math.pow(10, match[2] ? match[2].length : 1)
+}
+
 /**
  * Detect whether upstream displayName contradicts the model ID version or characteristics.
  * E.g. Upstream returns "Gemini 3.5 Flash Lite" for "gemini-2.5-flash-lite", "gemini-2.5-flash",
  * or "gemini-2.5-flash-thinking".
  */
 export function isUpstreamDisplayNameContradictory(id: string, upstreamName: string): boolean {
-  const idVer = /(?:gemini|claude)[-_](\d+(?:\.\d+)?)/i.exec(id)?.[1]
-  const nameVer = /(?:gemini|claude)\s+(\d+(?:\.\d+)?)/i.exec(upstreamName)?.[1]
-  if (idVer && nameVer && idVer !== nameVer) {
+  const idVer = extractModelVersion(id)
+  const nameVer = extractModelVersion(upstreamName)
+  if (idVer > 0 && nameVer > 0 && idVer !== nameVer) {
     return true
   }
   if (!/lite/i.test(id) && /lite/i.test(upstreamName)) {
@@ -266,61 +287,79 @@ export function isUpstreamDisplayNameContradictory(id: string, upstreamName: str
   return false
 }
 
-/**
- * Model categorization and sorting rank according to family hierarchy:
- * 1. Pro family (gemini-*-pro*)
- * 2. Gemini 4 family (gemini-4-*)
- * 3. Gemini 3 / 3.8 Flash family (gemini-3.8-flash*, gemini-3-flash*, gemini-3.5-flash without lite)
- * 4. Flash Lite family (gemini-*-flash-lite*, gemini-2.5-flash*, etc.)
- * 5. Claude family (claude-*)
- * 6. GPT family (gpt-*)
- * 7. Other models
- */
-export function getModelCategoryRank(id: string): number {
+export function getModelFamilyRank(id: string): number {
   const lower = id.toLowerCase()
-  if (lower.includes('pro')) return 1
-  if (lower.startsWith('gemini-4') || lower.includes('gemini-4') || lower.includes('argon')) return 2
-  if (lower.includes('flash') && !lower.includes('lite') && (lower.includes('3.8') || lower.includes('3-flash') || lower.includes('3.7') || lower.includes('3.6') || lower.includes('3.5'))) {
-    return 3
-  }
-  if (lower.includes('lite') || (lower.includes('flash') && lower.includes('2.5'))) return 4
-  if (lower.startsWith('claude')) return 5
-  if (lower.startsWith('gpt')) return 6
-  return 7
+  if (lower.startsWith('gemini')) return 1
+  if (lower.startsWith('claude')) return 2
+  if (lower.startsWith('gpt')) return 3
+  return 4
 }
 
-function extractModelVersion(id: string): number {
-  const match = /(?:gemini|claude|gpt)[-_](\d+(?:\.\d+)?)/i.exec(id)
-  return match && match[1] ? parseFloat(match[1]) : 0
+function getGeminiTierWeight(id: string): number {
+  const lower = id.toLowerCase()
+  if (lower.includes('pro') || lower.includes('ultra')) return 40
+  if (lower.includes('argon')) return 30
+  if (lower.includes('flash') && !lower.includes('lite') && !lower.includes('thinking')) return 30
+  if (lower.includes('lite')) return 20
+  if (lower.includes('thinking')) return 10
+  return 25
+}
+
+function getGeminiRankScore(id: string): number {
+  const ver = extractModelVersion(id)
+  const tier = getGeminiTierWeight(id)
+  // Gemini 3.x specific hierarchy: Standard Flash (3.8, 3.0) before Flash Lite (3.5, 3.1)
+  if (ver >= 3.0 && ver < 4.0) {
+    const isStandardFlash = id.includes('flash') && !id.includes('lite')
+    if (isStandardFlash) {
+      return 350 + (ver === 3 ? 1 : ver * 10)
+    } else {
+      return 300 + ver * 10
+    }
+  }
+  return ver * 100 + tier
+}
+
+function getClaudeTierWeight(id: string): number {
+  const lower = id.toLowerCase()
+  if (lower.includes('opus')) return 30
+  if (lower.includes('sonnet')) return 20
+  if (lower.includes('haiku')) return 10
+  return 15
+}
+
+function getClaudeRankScore(id: string): number {
+  const ver = extractModelVersion(id)
+  const tier = getClaudeTierWeight(id)
+  return ver * 100 + tier
 }
 
 /**
- * Deterministic model comparator that sorts models into user-defined families
- * (Pro -> Gemini 4 -> Flash 3.x -> Flash Lite / 2.5 -> Claude -> GPT -> Others),
- * and newer versions / higher capability tiers first within each family.
+ * Generalized, deterministic model comparator that sorts models into user-defined families
+ * (Gemini -> Claude -> GPT -> Others), and prioritizes newer versions and higher capability tiers.
+ * Automatically accommodates newly published upstream models without manual code changes.
  */
 export function compareModels(a: { id: string }, b: { id: string }): number {
-  const rankA = getModelCategoryRank(a.id)
-  const rankB = getModelCategoryRank(b.id)
-  if (rankA !== rankB) return rankA - rankB
+  const famA = getModelFamilyRank(a.id)
+  const famB = getModelFamilyRank(b.id)
+  if (famA !== famB) return famA - famB
 
-  // Within Claude: Opus before Sonnet
-  if (rankA === 5) {
-    const verA = extractModelVersion(a.id)
-    const verB = extractModelVersion(b.id)
-    if (verA !== verB) return verB - verA
-
-    const isOpusA = a.id.includes('opus')
-    const isOpusB = b.id.includes('opus')
-    if (isOpusA !== isOpusB) return isOpusA ? -1 : 1
+  if (famA === 1) {
+    const scoreA = getGeminiRankScore(a.id)
+    const scoreB = getGeminiRankScore(b.id)
+    if (scoreA !== scoreB) return scoreB - scoreA
   }
 
-  // Within same category, newer version first
+  if (famA === 2) {
+    const scoreA = getClaudeRankScore(a.id)
+    const scoreB = getClaudeRankScore(b.id)
+    if (scoreA !== scoreB) return scoreB - scoreA
+  }
+
   const verA = extractModelVersion(a.id)
   const verB = extractModelVersion(b.id)
   if (verA !== verB) return verB - verA
 
-  // Tie-breaker: alphabetical by id
   return a.id.localeCompare(b.id)
 }
 

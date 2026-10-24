@@ -125,23 +125,41 @@ export function registerDiscoveredTieredModels(tiered?: Record<string, string[]>
   }
 }
 
+const DISCOVERED_UNIFIED_THINKING_FAMILIES = new Set<string>()
+
+/** Register dynamically discovered unified thinking families (e.g. models with discrete -low/-medium/-high variants). */
+export function registerDiscoveredUnifiedThinkingFamily(baseId: string): void {
+  DISCOVERED_UNIFIED_THINKING_FAMILIES.add(baseId)
+}
+
+/** Check whether a model ID is a unified thinking family (known static or dynamically discovered). */
+export function isUnifiedThinkingFamily(modelId: string): boolean {
+  return (
+    modelId === 'gemini-4-argon' ||
+    modelId === 'claude-opus-5-5' ||
+    modelId === 'claude-sonnet-5-5' ||
+    DISCOVERED_UNIFIED_THINKING_FAMILIES.has(modelId)
+  )
+}
+
 /** Reset discovered tiered models (used by test suites). */
 export function resetDiscoveredTieredModels(): void {
   DISCOVERED_TIERED_FAMILIES.clear()
+  DISCOVERED_UNIFIED_THINKING_FAMILIES.clear()
 }
 
 /**
  * Level-thinking models: a single id with selectable tiers via `thinkingLevel`.
  *
  * Consults dynamically discovered `tieredModelIds` first, falling back to the catalog's
- * explicit `thinking: 'level'` metadata and the legacy `-tiered` naming suffix for offline use.
+ * explicit `thinking: 'level'` metadata, unified thinking families, and legacy `-tiered` suffix.
  */
 export function isLevelThinkingModel(modelId: string): boolean {
   if (catalogModel(modelId)?.thinking === 'level') return true
   if (DISCOVERED_TIERED_FAMILIES.has(modelId)) return true
   if (typeof modelId === 'string') {
     if (modelId.endsWith('-tiered')) return true
-    if (modelId === 'gemini-4-argon' || modelId === 'claude-opus-5-5' || modelId === 'claude-sonnet-5-5') return true
+    if (isUnifiedThinkingFamily(modelId)) return true
   }
   return false
 }
