@@ -61,7 +61,7 @@ describe('AgySessionManager', () => {
     const session = await sessions.getSession()
     expect(session).toBeDefined()
     expect(session!.auth.access).toBe('at')
-    expect(session!.impersonation['User-Agent']).toMatch(/^antigravity\/\d+\.\d+\.\d+/)
+    expect(session!.impersonation['User-Agent']).toMatch(/^antigravity\/(?:hub\/)?\d+\.\d+\.\d+/)
     expect(session!.impersonation.clientMetadata.ideType).toContain('ANTIGRAVITY')
   })
 
@@ -739,7 +739,7 @@ describe('usage-driven selection', () => {
       const first = impersonationHeadersFor(account('a@x'))
       const second = impersonationHeadersFor(account('a@x'))
       expect(first).toEqual(second)
-      expect(first['User-Agent']).toMatch(/^antigravity\/\d+\.\d+\.\d+ \S+$/)
+      expect(first['User-Agent']).toMatch(/^antigravity\/(?:hub\/)?\d+\.\d+\.\d+/)
       expect(first.clientMetadata.ideType).toContain('ANTIGRAVITY')
       vi.unstubAllEnvs()
     }
@@ -1633,7 +1633,7 @@ describe('fingerprint version freshness', () => {
 
       const fp = (await store.load()).accounts[0]!.fingerprint!
       expect(fp.userAgent).not.toContain('1.22.2')
-      expect(fp.userAgent).toMatch(/^antigravity\/\d+\.\d+\.\d+ darwin\/arm64$/)
+      expect(fp.userAgent).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ \(aidev_client; os_type=darwin; arch=arm64; cl=\d+\)$/)
     } finally {
       _setFingerprintDataForTest(undefined)
       vi.unstubAllGlobals()

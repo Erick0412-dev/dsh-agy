@@ -318,14 +318,14 @@ describe('bootstrap UA version freshness', () => {
    */
   it('advertises the published version, not a per-call default', () => {
     setResolvedAgyVersion('9.9.9')
-    expect(getAgyBootstrapUserAgent()).toContain('Antigravity/9.9.9')
+    expect(getAgyBootstrapUserAgent()).toContain('antigravity/hub/9.9.9')
     // The short form used by the version feeds agrees with the bootstrap form.
-    expect(antigravityUserAgent()).toBe('antigravity/9.9.9 darwin/arm64')
+    expect(antigravityUserAgent()).toBe('antigravity/hub/9.9.9 (aidev_client; os_type=darwin; arch=arm64; cl=1003475615)')
   })
 
   it('falls back to the pinned floor before any version is resolved', () => {
     setResolvedAgyVersion(undefined)
-    expect(getAgyBootstrapUserAgent()).toContain(`Antigravity/${AGY_VERSION_FALLBACK}`)
+    expect(getAgyBootstrapUserAgent()).toContain(`antigravity/hub/${AGY_VERSION_FALLBACK}`)
     expect(currentAgyVersion()).toBe(AGY_VERSION_FALLBACK)
   })
 
@@ -341,8 +341,8 @@ describe('bootstrap UA version freshness', () => {
 
     expect(await resolveAntigravityVersion(fetchImpl)).toBe('1.19.0')
     // Resolution must reach the bootstrap UA without any call site passing it.
-    expect(getAgyBootstrapUserAgent()).toContain('Antigravity/1.19.0')
-    expect(antigravityUserAgent()).toBe('antigravity/1.19.0 darwin/arm64')
+    expect(getAgyBootstrapUserAgent()).toContain('antigravity/hub/1.19.0')
+    expect(antigravityUserAgent()).toBe('antigravity/hub/1.19.0 (aidev_client; os_type=darwin; arch=arm64; cl=1003475615)')
   })
 
   it('reports nothing observed when the feeds yield nothing', async () => {
