@@ -185,6 +185,8 @@ export interface ManagedAccount {
   cachedQuotaUpdatedAt?: number
   /** Grouped 5h/weekly windows, display-only (see `CachedLimits`). */
   cachedLimits?: CachedLimits
+  /** Discovered model ids available for this specific account. */
+  cachedModels?: string[]
   /** Per-account proxy URL (e.g. http://user:pass@host:8080 or socks5://host:1080). Undefined = follow env. */
   proxy?: string
 }

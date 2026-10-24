@@ -267,6 +267,14 @@ export function pickNextAccountIndex(
       if (index === currentIndex || account.enabled === false) return false
       if (isCoolingDown(account, now)) return false
       if (modelOrFamily && isFamilyRateLimited(account, modelOrFamily, now)) return false
+      if (modelOrFamily && account.cachedModels && account.cachedModels.length > 0) {
+        if (!account.cachedModels.includes(modelOrFamily)) {
+          const base = modelOrFamily.replace(/-(?:low|medium|high|tiered)$/, '')
+          if (!account.cachedModels.some((m) => m === modelOrFamily || m.startsWith(base + '-'))) {
+            return false
+          }
+        }
+      }
       return true
     })
   if (enabled.length === 0) return currentIndex
