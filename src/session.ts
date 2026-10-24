@@ -191,6 +191,23 @@ interface QuotaRefreshResult {
  * {@link getFingerprintData} so a `$DSH_HOME/agy/agy-fingerprint-data.json` override
  * still applies on this path.
  */
+/** Whether a specific account is known to support the requested model. */
+export function isModelSupportedByAccount(account: ManagedAccount, model?: string): boolean {
+  if (!model || !account.cachedModels || account.cachedModels.length === 0) return true
+  if (account.cachedModels.includes(model)) return true
+  const tieredMatch = /^(.*)-tiered$/.exec(model)
+  if (tieredMatch) {
+    const base = tieredMatch[1]
+    if (account.cachedModels.some((m) => m === model || m.startsWith(base + '-'))) return true
+  }
+  const levelMatch = /^(.*)-(?:low|medium|high)$/.exec(model)
+  if (levelMatch) {
+    const base = levelMatch[1]
+    if (account.cachedModels.some((m) => m === model || m === `${base}-tiered` || m.startsWith(base + '-'))) return true
+  }
+  return false
+}
+
 export function impersonationHeadersFor(account: ManagedAccount): AgyAccountSession['impersonation'] {
   const fingerprint = account.fingerprint
   if (fingerprint) {
@@ -735,7 +752,8 @@ export class AgySessionManager {
             this.probeQuotaSummary(account),
           ])
           const quotas = ingestFamilyQuotas(discovered, groups, account.cachedQuota)
-          return { key, quotas, updatedAt: Date.now() }
+          const models = Object.keys(discovered.models ?? {})
+          return { key, quotas, models, updatedAt: Date.now() }
         } catch {
           return null
         }
@@ -748,13 +766,14 @@ export class AgySessionManager {
       }
     }))
 
-    const updates = results.filter((r): r is { key: string; quotas: Record<string, CachedQuota>; updatedAt: number } => Boolean(r && Object.keys(r.quotas).length > 0))
+    const updates = results.filter((r): r is { key: string; quotas: Record<string, CachedQuota>; models: string[]; updatedAt: number } => Boolean(r && Object.keys(r.quotas).length > 0))
     if (updates.length > 0) {
       for (const update of updates) {
         const target = storage.accounts.find((candidate) => this.accountKey(candidate) === update.key)
         if (target) {
           target.cachedQuota = update.quotas
           target.cachedQuotaUpdatedAt = update.updatedAt
+          if (update.models.length > 0) target.cachedModels = update.models
         }
       }
       try {
@@ -764,6 +783,7 @@ export class AgySessionManager {
             if (target) {
               target.cachedQuota = update.quotas
               target.cachedQuotaUpdatedAt = update.updatedAt
+              if (update.models.length > 0) target.cachedModels = update.models
             }
           }
         })
@@ -804,6 +824,7 @@ export class AgySessionManager {
         const last = storage.accounts[lastIndex]!
         if (
           last.enabled !== false &&
+          isModelSupportedByAccount(last, model) &&
           !isCoolingDown(last, now) &&
           !isFamilyRateLimited(last, familyKey, now) &&
           !isFamilyQuotaExhausted(last, family, now)
@@ -814,15 +835,16 @@ export class AgySessionManager {
     }
     const eligible = storage.accounts
       .map((account, index) => ({ account, index }))
-      .filter(({ account }) => account.enabled !== false)
+      .filter(({ account }) => account.enabled !== false && isModelSupportedByAccount(account, model))
     if (eligible.length === 0) return undefined
 
-    // Prioritize the active account as long as it is enabled, not cooling down,
-    // not family rate-limited, and not quota-exhausted.
+    // Prioritize the active account as long as it is enabled, supports the model,
+    // not cooling down, not family rate-limited, and not quota-exhausted.
     const active = storage.accounts[storage.activeIndex]
     const isActiveUsable = (acc: ManagedAccount | undefined): acc is ManagedAccount =>
       acc !== undefined
       && acc.enabled !== false
+      && isModelSupportedByAccount(acc, model)
       && !isCoolingDown(acc, now)
       && !isFamilyRateLimited(acc, familyKey, now)
       && !isFamilyQuotaExhausted(acc, family, now)
