@@ -2266,7 +2266,7 @@ describe('AgyAdapter', () => {
     // proxied account silently generated from the host's real IP.
     const { dispatcherForAsync, proxyAgent } = await import('../src/proxy.ts')
     const { withProxyFixture } = await import('./helpers/proxy-fixture.ts')
-    const fetchSpy = vi.fn(async () => new Response(sseStream(['data: [DONE]']), { status: 200 }))
+    const fetchSpy = vi.fn(async () => new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
     await withProxyFixture(async (accountProxy) => {
@@ -2906,7 +2906,7 @@ describe('AgyAdapter', () => {
       // First attempt reports the per-session accumulation wall; the resend must
       // succeed, which only happens if the derived session id actually changed.
       if (bodies.length === 1) return new Response(wall, { status: 400 })
-      return new Response(sseStream(['data: [DONE]']), { status: 200 })
+      return new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 })
     }))
 
     const failures: string[] = []
@@ -2941,7 +2941,7 @@ describe('AgyAdapter', () => {
         header: new Headers(init?.headers as HeadersInit).get('x-goog-request-id'),
         body: JSON.parse(String(init?.body)) as { requestId?: string },
       })
-      return new Response(sseStream(['data: [DONE]']), { status: 200 })
+      return new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 })
     }))
 
     const adapter = new AgyAdapter({
@@ -2968,7 +2968,7 @@ describe('AgyAdapter', () => {
         sessionId: body.request.sessionId,
       })
       if (seen.length === 1) return new Response(wall, { status: 400 })
-      return new Response(sseStream(['data: [DONE]']), { status: 200 })
+      return new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 })
     }))
 
     const adapter = new AgyAdapter({
@@ -2994,7 +2994,7 @@ describe('AgyAdapter', () => {
     const seen: Array<string | null> = []
     vi.stubGlobal('fetch', vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       seen.push(new Headers(init?.headers as HeadersInit).get('user-agent'))
-      return new Response(sseStream(['data: [DONE]']), { status: 200 })
+      return new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 })
     }))
 
     const adapter = new AgyAdapter({
@@ -3035,7 +3035,7 @@ describe('AgyAdapter', () => {
     const bodies: Array<{ request: { contents: Array<{ parts: unknown[] }> } }> = []
     vi.stubGlobal('fetch', vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)))
-      return new Response(sseStream(['data: [DONE]']), { status: 200 })
+      return new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 })
     }))
     let inFlight = 0
     let maxInFlight = 0
@@ -3235,6 +3235,64 @@ describe('AgyAdapter', () => {
     expect(seen[0]?.category).not.toBe('quota_exhausted')
   })
 
+  it('surfaces a GRANT-wall 403 as a retryable RATE_LIMIT and never as a dead credential', async () => {
+    // Issue #114 at the adapter boundary: the throw shape decides whether DSH
+    // retries at all. INVALID_CREDENTIAL is terminal AND revokes the account in
+    // rotation, so a pool that should rotate must see RATE_LIMIT here.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: { code: 403, status: 'PERMISSION_DENIED', message: 'You are not eligible for this model' },
+    }), { status: 403 })))
+    const failures: string[] = []
+    const adapter = new AgyAdapter({
+      getSession: async () => session(),
+      reportFailure: async (kind) => { failures.push(kind) },
+    })
+    let thrown: { code?: string; failure?: { providerRetryAfterMs?: number } } | undefined
+    try {
+      for await (const _ of adapter.stream(generateOptions())) void _
+    } catch (error) {
+      thrown = error as typeof thrown
+    }
+    expect(thrown?.code).toBe('RATE_LIMIT')
+    expect(failures).toEqual(['project-error'])
+    // The park is local; a hint above DSH's 10s maxDelayMs makes it give up.
+    expect(thrown?.failure?.providerRetryAfterMs).toBeUndefined()
+  })
+
+  it('reports EMPTY_RESPONSE (retryable) when the stream completes without content', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sseStream(['data: [DONE]']), { status: 200 })))
+    const failures: string[] = []
+    const adapter = new AgyAdapter({
+      getSession: async () => session(),
+      reportFailure: async (kind) => { failures.push(kind) },
+    })
+    await expect(async () => {
+      for await (const _ of adapter.stream(generateOptions())) void _
+    }).rejects.toMatchObject({ code: 'EMPTY_RESPONSE' })
+    // Nothing was delivered, so retrying cannot replay a turn the user saw; an
+    // empty body is not an account fault and must not cool one.
+    expect(failures).toEqual([])
+  })
+
+  it('surfaces a stream that dies before the first chunk as retryable TRANSPORT', async () => {
+    // The user-visible "terminated (UND_ERR_SOCKET: other side closed)" case: the
+    // attempt never handed anything to the consumer, so a retry is safe, while the
+    // terminal UPSTREAM of a mid-body death would have killed the turn.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error('other side closed')) } }),
+      { status: 200 },
+    )))
+    const failures: string[] = []
+    const adapter = new AgyAdapter({
+      getSession: async () => session(),
+      reportFailure: async (kind) => { failures.push(kind) },
+    })
+    await expect(async () => {
+      for await (const _ of adapter.stream(generateOptions())) void _
+    }).rejects.toMatchObject({ code: 'TRANSPORT' })
+    expect(failures).toEqual(['network-error'])
+  })
+
   it('throws RATE_LIMIT with retry delay on soft/rate limits (harness retries)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 429, headers: { 'retry-after': '2' } })))
     const adapter = new AgyAdapter({
@@ -3381,7 +3439,7 @@ describe('AgyAdapter', () => {
   })
 
   it('releases the in-flight slot when a consumer abandons the stream', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(sseStream(['data: [DONE]']), { status: 200 })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sseStream(['data: [{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}]', 'data: [DONE]']), { status: 200 })))
 
     const events: string[] = []
     const account = { email: 'a@b.c', refresh: 'rt|p', projectId: 'p', addedAt: 0, lastUsed: 0 }

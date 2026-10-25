@@ -706,6 +706,7 @@ export class AgyAdapter extends LlmAdapter {
        */
       const pendingSignatures: Array<readonly [string, string]> = []
       let yieldedDirect = false
+      let sawContent = false
       let usage: { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined
       let ttftMs: number | undefined
 
@@ -751,6 +752,11 @@ export class AgyAdapter extends LlmAdapter {
             }
           }
 
+          // `usage` and `finish` are bookkeeping, not content: the parser emits
+          // them even for a turn whose candidates carried no parts at all, so
+          // counting raw chunks would call an empty answer a successful one.
+          if (chunk.type !== 'usage' && chunk.type !== 'finish') sawContent = true
+
           if (yieldedDirect) {
             // Past the hand-off, so this chunk leaves immediately: its signature
             // commits here rather than at stream end. A `functionCall` can arrive
@@ -773,12 +779,13 @@ export class AgyAdapter extends LlmAdapter {
           }
         }
 
-        // A stream that produced no chunk at all (no text, no thought, no tool
-        // call) is not a successful answer: the turn is contentless and the user
-        // sees silence. Nothing was delivered, so a retry replays a turn the
-        // consumer never saw — EMPTY_RESPONSE is retryable and no failure is
-        // reported, because an empty body is not an account fault.
-        if (!yieldedDirect && bufferedChunks.length === 0) {
+        // A stream that produced no CONTENT (no text, no thought, no tool call) is
+        // not a successful answer: the parser's trailing `finish` would otherwise
+        // make an empty turn look complete while the user sees silence. Nothing
+        // was delivered, so a retry replays a turn the consumer never saw —
+        // EMPTY_RESPONSE is retryable and no failure is reported, because an empty
+        // body is not an account fault.
+        if (!yieldedDirect && !sawContent) {
           await response.body?.cancel().catch(() => {})
           throw new LlmError('agy returned an empty response', EMPTY_RESPONSE_CODE)
         }
