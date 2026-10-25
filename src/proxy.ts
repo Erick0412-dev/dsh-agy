@@ -11,22 +11,6 @@ import { isProxyRouted } from './types.ts'
 import type { AccountRouting } from './types.ts'
 import { redactCredentials } from './redact.ts'
 
-const envAgent = new EnvHttpProxyAgent()
-
-/**
- * Streaming variant of the env agent. A generation stream may legitimately stay
- * silent for minutes mid-turn (reasoning), and undici's `bodyTimeout` is a
- * per-gap inactivity timer — the 30s control-plane value kills such a turn.
- * Only generation uses this agent; every other call keeps the short bound.
- */
-const envStreamingAgent = new EnvHttpProxyAgent({ bodyTimeout: 0 })
-
-/** The env proxy agent (exported for tests). */
-export const proxyAgent = envAgent
-
-/** The streaming env proxy agent (exported for tests). */
-export const proxyStreamingAgent = envStreamingAgent
-
 // ── Dispatcher cache, keyed `normalizedProxyUrl|stream` ──
 // Entries live for the process, so the cache size tracks the number of DISTINCT
 // proxy URLs in use rather than the account count. (It previously claimed to be
@@ -303,6 +287,36 @@ const DISPATCHER_OPTS = {
 
 /** Streaming dispatcher options: same bounds, minus the body inactivity timer. */
 const STREAMING_DISPATCHER_OPTS = { ...DISPATCHER_OPTS, bodyTimeout: 0 } as const
+
+/**
+ * Env-route agents (no per-account proxy). They MUST carry the same bounds as
+ * the per-proxy dispatchers above — and for a long time they did not: both were
+ * constructed with no options, so every UNPROXIED account (the normal shape of
+ * this pool) ran on undici's defaults, i.e. a 300s `headersTimeout`.
+ *
+ * That is measured, not theoretical. The generation path walks
+ * `AGY_ENDPOINT_FALLBACKS` in series, so one endpoint that accepts the
+ * connection and never answers held a single request for exactly 300s: the
+ * ledger recorded 301.9s and 606.3s failed attempts (`agy-recent.json`,
+ * 2026-10-25 17:17:04 and 17:30:20). The 606s one is the freeze — by then the
+ * walk had reached the production host, whose permanent RESOURCE_EXHAUSTED
+ * became the account's verdict.
+ *
+ * `bodyTimeout: 0` stays on the STREAMING class alone: it is the per-gap body
+ * inactivity timer, and a generation stream may legitimately stay silent for
+ * minutes mid-turn (reasoning). The SSE read loop's own idle watchdog bounds a
+ * stalled body instead.
+ */
+const envAgent = new EnvHttpProxyAgent(DISPATCHER_OPTS)
+
+/** Streaming env agent: same bounds, minus the body inactivity timer. */
+const envStreamingAgent = new EnvHttpProxyAgent(STREAMING_DISPATCHER_OPTS)
+
+/** The env proxy agent (exported for tests). */
+export const proxyAgent = envAgent
+
+/** The streaming env proxy agent (exported for tests). */
+export const proxyStreamingAgent = envStreamingAgent
 
 /** Shape shared by both dispatcher option sets. */
 export type DispatcherOpts = { -readonly [K in keyof typeof DISPATCHER_OPTS]: number }
