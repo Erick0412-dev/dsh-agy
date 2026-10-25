@@ -1688,11 +1688,14 @@ describe('models', () => {
       },
     })
     const ids = merged.map((m) => m.id)
-    // 3.8 flash tiered hides its split siblings
+    // 3.8 flash tiered hides its split siblings and avoids duplicate base model
     expect(ids).toContain('gemini-3.8-flash-tiered')
+    expect(ids).not.toContain('gemini-3.8-flash')
     expect(ids).not.toContain('gemini-3.8-flash-high')
     expect(ids).not.toContain('gemini-3.8-flash-medium')
     expect(ids).not.toContain('gemini-3.8-flash-low')
+    const names = merged.map((m) => m.name)
+    expect(names.filter((n) => n === 'Gemini 3.8 Flash')).toHaveLength(1)
     // 4 argon unifies into gemini-4-argon with level thinking, hiding its split siblings
     expect(ids).toContain('gemini-4-argon')
     expect(ids).not.toContain('gemini-4-argon-high')

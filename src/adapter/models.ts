@@ -197,7 +197,7 @@ function hiddenDiscoveredIds(dynamic: DiscoveredModels): Set<string> {
     }
   }
   for (const [base, count] of splitCounts.entries()) {
-    if (count >= 2 || isUnifiedThinkingFamily(base)) {
+    if ((count >= 2 || isUnifiedThinkingFamily(base)) && !Object.hasOwn(models, `${base}-tiered`)) {
       registerDiscoveredUnifiedThinkingFamily(base)
     }
   }
@@ -401,7 +401,11 @@ export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
     const m = /^(.*)-(?:low|medium|high|max)$/.exec(splitId)
     if (m && m[1]) {
       const base = m[1]
-      if (isLevelThinkingModel(base) && !entries.some((e) => e.id === base)) {
+      if (
+        isLevelThinkingModel(base) &&
+        !entries.some((e) => e.id === base) &&
+        !entries.some((e) => e.id === `${base}-tiered`)
+      ) {
         const meta = catalogModel(base)
         entries.push({
           provider: AGY_PROVIDER,
