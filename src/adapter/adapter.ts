@@ -442,12 +442,17 @@ export class AgyAdapter extends LlmAdapter {
         if (error.kind === 'quota-exhausted') {
           throw new LlmError(error.message, QUOTA_EXCEEDED_CODE)
         }
-        // Deliberately NO `providerRetryAfterMs`: the pool is blocked by a
-        // cooldown, not by an upstream instruction, and DSH's 10s `maxDelayMs`
-        // turns any longer delay into `next()` — an immediate give-up with no
-        // retry at all. Without the hint DSH backs off locally, which is the only
-        // way the blocking cooldown ever expires mid-turn.
+        const delta = Math.ceil(error.blockedUntil - Date.now())
+        // DSH's normal retry policy honors providerRetryAfterMs up to policy.maxDelayMs (10s).
+        // For short local cooldowns (<=10s, e.g. 5.5s network error), pass providerRetryAfterMs
+        // so DSH sleeps and retries after the account unlocks (matching v0.4.6).
+        // For long blockages (>10s, e.g. 5m rate limit or 24h quota), omit it so DSH's 10s cap
+        // does not turn it into next() (immediate turn abortion).
+        const providerRetryAfterMs = Number.isFinite(delta) && delta > 0 && delta <= 10_000
+          ? Math.max(delta, 1000)
+          : undefined
         throw new LlmError(error.message, 'RATE_LIMIT', {
+          ...(providerRetryAfterMs !== undefined ? { providerRetryAfterMs } : {}),
           requestId: ProviderRequestId(generateAntigravityRequestId()),
         })
       }

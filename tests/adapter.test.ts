@@ -3367,7 +3367,7 @@ describe('AgyAdapter', () => {
     }
   })
 
-  it('converts a retryable pool blockage into RATE_LIMIT without a retry hint', async () => {
+  it('converts retryable pool blockage into RATE_LIMIT with delay hint when within DSH maxDelayMs (<= 10s)', async () => {
     const resetAt = Date.now() + 5000
     const adapter = new AgyAdapter({
       getSession: async () => {
@@ -3383,10 +3383,31 @@ describe('AgyAdapter', () => {
       thrown = error
     }
     expect(thrown).toMatchObject({ code: 'RATE_LIMIT' })
-    // Deliberately NO providerRetryAfterMs: the pool block is a local cooldown,
-    // and DSH's normal retry mode calls next() — giving up the turn — as soon as
-    // the hint exceeds its 10s maxDelayMs. A 24h quota park used to mean "one
-    // attempt, then the turn dies", which is what the screenshots show.
+    // Within 10s maxDelayMs: matches v0.4.6 behavior by passing providerRetryAfterMs
+    // so DSH sleeps and retries after the account unlocks.
+    const failure = (thrown as { failure?: { providerRetryAfterMs?: number } }).failure
+    expect(failure?.providerRetryAfterMs).toBeGreaterThan(0)
+    expect(failure?.providerRetryAfterMs).toBeLessThanOrEqual(5000)
+  })
+
+  it('converts retryable pool blockage into RATE_LIMIT without a retry hint when exceeding 10s', async () => {
+    const resetAt = Date.now() + 60_000
+    const adapter = new AgyAdapter({
+      getSession: async () => {
+        throw new AgyPoolBlockedError('retryable', resetAt)
+      },
+      reportFailure: async () => {},
+    })
+
+    let thrown: unknown
+    try {
+      for await (const _ of adapter.stream(generateOptions())) void _
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toMatchObject({ code: 'RATE_LIMIT' })
+    // Deliberately NO providerRetryAfterMs when exceeding 10s: DSH's normal retry mode
+    // calls next() — giving up the turn — as soon as the hint exceeds its 10s maxDelayMs.
     const failure = (thrown as { failure?: { providerRetryAfterMs?: number } }).failure
     expect(failure?.providerRetryAfterMs).toBeUndefined()
   })
