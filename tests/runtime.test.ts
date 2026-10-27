@@ -402,6 +402,13 @@ describe('rotation state machine', () => {
     expect(d5.backoffMs).toBeGreaterThan(d0.backoffMs)
   })
 
+  it('maps 1st consecutive failure to tier 0 (5s) rather than tier 1 (10s)', () => {
+    const acc = account()
+    const d1 = decideRotation('network-error', acc, 1)
+    expect(d1.backoffMs).toBeGreaterThanOrEqual(5_000)
+    expect(d1.backoffMs).toBeLessThan(6_000)
+  })
+
   it('cools daily quota until the real reset time (capped at 24h)', () => {
     const before = Date.now()
     const acc = account()

@@ -52,7 +52,7 @@ export const MAX_IN_FLIGHT_PER_ACCOUNT = 3
 export const IN_FLIGHT_STALE_MS = 10 * 60 * 1000
 
 function backoffFor(consecutiveFailures: number, maxJitterMs = 1_000): number {
-  const index = Math.min(Math.max(consecutiveFailures, 0), BACKOFF_TIERS_MS.length - 1)
+  const index = Math.min(Math.max(consecutiveFailures - 1, 0), BACKOFF_TIERS_MS.length - 1)
   const base = BACKOFF_TIERS_MS[index] ?? BACKOFF_TIERS_MS[BACKOFF_TIERS_MS.length - 1]!
   return base + Math.floor(Math.random() * maxJitterMs)
 }
