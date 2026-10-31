@@ -1538,6 +1538,21 @@ describe('models', () => {
     expect(formatTieredModelName('gemini-4.0-pro-tiered')).toBe('Gemini 4.0 Pro')
   })
 
+  it('rejects contradictory upstream display names (e.g. Gemini 2.5 models mislabeled as 3.5 Flash Lite)', () => {
+    const merged = mergeModelCatalog({
+      models: {
+        'gemini-2.5-flash-lite': { displayName: 'Gemini 3.5 Flash Lite' },
+        'gemini-2.5-flash': { displayName: 'Gemini 3.5 Flash Lite' },
+        'gemini-2.5-flash-thinking': { displayName: 'Gemini 3.5 Flash Lite' },
+        'gemini-3.5-flash-lite': { displayName: 'Gemini 3.5 Flash Lite' },
+      },
+    })
+    expect(merged.find((m) => m.id === 'gemini-2.5-flash-lite')?.name).toBe('Gemini 2.5 Flash Lite')
+    expect(merged.find((m) => m.id === 'gemini-2.5-flash')?.name).toBe('Gemini 2.5 Flash')
+    expect(merged.find((m) => m.id === 'gemini-2.5-flash-thinking')?.name).toBe('Gemini 2.5 Flash Thinking')
+    expect(merged.find((m) => m.id === 'gemini-3.5-flash-lite')?.name).toBe('Gemini 3.5 Flash Lite')
+  })
+
   it('merges dynamic ids with catalog metadata and filters tab models', () => {
     const merged = mergeModelCatalog({
       models: {
