@@ -1855,6 +1855,17 @@ describe('models', () => {
     const dynamicFlash = resolveAgyModel('agy', 'gemini-custom-flash-id')
     expect(dynamicFlash.reasoning).toBeDefined()
     expect(dynamicFlash.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
+
+    // Upstream sometimes redundantly puts flash models in both flash and pro groups
+    registerDiscoveredTieredModels({
+      flashLite: ['gemini-3.5-flash-lite'],
+      flash: ['gemini-3.8-flash-tiered'],
+      pro: ['gemini-3.8-flash-tiered', 'gemini-3.1-pro-low'],
+    })
+    const flashTiered = resolveAgyModel('agy', 'gemini-3.8-flash-tiered')
+    expect(flashTiered.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'medium', 'high'])
+    const proLowModel = resolveAgyModel('agy', 'gemini-3.1-pro-low')
+    expect(proLowModel.reasoning!.efforts.map((e) => String(e.id))).toEqual(['low', 'high'])
   })
 
   it('declares no default reasoning effort, so the selector keeps an adaptive option', () => {
