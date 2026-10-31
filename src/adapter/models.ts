@@ -11,6 +11,7 @@ import { formatTieredModelName } from './catalog.ts'
 import {
   AGY_PUBLIC_MODELS,
   catalogModel,
+  formatTieredModelName,
   isChatCallableModelId,
   isLevelThinkingModel,
   isUnifiedThinkingFamily,
@@ -347,6 +348,26 @@ export function compareModels(a: { id: string }, b: { id: string }): number {
   return a.id.localeCompare(b.id)
 }
 
+/**
+ * Detect whether upstream displayName contradicts the model ID version or characteristics.
+ * E.g. Upstream returns "Gemini 3.5 Flash Lite" for "gemini-2.5-flash-lite", "gemini-2.5-flash",
+ * or "gemini-2.5-flash-thinking".
+ */
+export function isUpstreamDisplayNameContradictory(id: string, upstreamName: string): boolean {
+  const idVer = /(?:gemini|claude)[-_](\d+(?:\.\d+)?)/i.exec(id)?.[1]
+  const nameVer = /(?:gemini|claude)\s+(\d+(?:\.\d+)?)/i.exec(upstreamName)?.[1]
+  if (idVer && nameVer && idVer !== nameVer) {
+    return true
+  }
+  if (!/lite/i.test(id) && /lite/i.test(upstreamName)) {
+    return true
+  }
+  if (!/thinking/i.test(id) && /thinking/i.test(upstreamName)) {
+    return true
+  }
+  return false
+}
+
 /** Merge dynamic ids with catalog metadata; non-chat and superseded ids are dropped, unknown ids keep minimal info. */
 export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
   if (dynamic.tieredModelIds) {
@@ -357,8 +378,18 @@ export function mergeModelCatalog(dynamic: DiscoveredModels): LlmModelInfo[] {
   for (const [id, entry] of Object.entries(dynamic.models ?? {})) {
     if (!isChatCallableModelId(id) || hidden.has(id)) continue
     const meta = catalogModel(id)
-    const rawDisplayName = entry.displayName && entry.displayName !== id ? entry.displayName : undefined
-    const displayName = rawDisplayName ?? meta?.name ?? entry.displayName ?? entry.modelName ?? id
+    const rawDisplayName =
+      entry.displayName && entry.displayName !== id && !isUpstreamDisplayNameContradictory(id, entry.displayName)
+        ? entry.displayName
+        : undefined
+    const displayName =
+      rawDisplayName ??
+      meta?.name ??
+      (entry.displayName && !isUpstreamDisplayNameContradictory(id, entry.displayName)
+        ? entry.displayName
+        : undefined) ??
+      entry.modelName ??
+      formatTieredModelName(id)
     const contextWindow =
       meta?.contextLength ??
       (typeof entry.maxTokens === 'number' && entry.maxTokens > 0 ? entry.maxTokens : undefined)
